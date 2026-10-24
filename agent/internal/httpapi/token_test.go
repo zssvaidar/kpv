@@ -7,6 +7,7 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -148,5 +149,99 @@ func TestATokenRefusesToRenderItself(t *testing.T) {
 	slog.New(slog.NewTextHandler(&logged, nil)).Info("startup", "token", token)
 	if strings.Contains(logged.String(), secret) {
 		t.Errorf("logging a token wrote the secret: %s", logged.String())
+	}
+}
+
+// The shapes a Token is actually held in, which are the shapes that used to
+// leak it.
+//
+// fmt reaches a value through an unexported field without being able to call
+// any method on it, so it printed Token's fields raw; Server.token and
+// guard.token are both unexported fields, so %v on a Server, and a single
+// slog.Info with a Server as an attribute, wrote the token out in full. %p did
+// the same for a Token on its own, because fmt handles %p before it consults a
+// Formatter. None of that is fixed by a method: it is fixed by the plaintext
+// not being in a field at all.
+func TestATokenHeldInsideAnotherStructStillCannotBePrinted(t *testing.T) {
+	t.Parallel()
+
+	server, err := New(Options{})
+	if err != nil {
+		t.Fatalf("bind a server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	secret := server.Token().Secret()
+	if secret == "" {
+		t.Fatal("the server has no token, so this test proves nothing")
+	}
+
+	// A struct of our own holding a Token in an unexported field, the shape
+	// fmt cannot dispatch a method through.
+	type holder struct {
+		token Token
+		note  string
+	}
+	held := holder{token: server.Token(), note: "note"}
+	theGuard := &guard{token: server.Token(), origins: nil, logger: discardLogger()}
+
+	subjects := map[string]any{
+		"a Token":                         server.Token(),
+		"a pointer to a Token":            &held.token,
+		"a struct holding one unexported": held,
+		"a pointer to that struct":        &held,
+		"the guard":                       theGuard,
+		"the guard dereferenced":          *theGuard,
+		"the server":                      server,
+		"the server dereferenced":         *server,
+		"a slice of Tokens":               []Token{server.Token()},
+		"a map of Tokens":                 map[string]Token{"session": server.Token()},
+		"a struct with an exported Token": struct{ Token Token }{server.Token()},
+		"an any holding a Token":          any(server.Token()),
+	}
+	// Every verb, including the ones fmt never asks a Formatter about.
+	verbs := []string{"%v", "%+v", "%#v", "%s", "%q", "%d", "%x", "%X", "%p", "%T"}
+
+	for name, subject := range subjects {
+		for _, verb := range verbs {
+			if out := fmt.Sprintf(verb, subject); strings.Contains(out, secret) {
+				t.Errorf("%s printed with %s leaks the token: %s", name, verb, out)
+			}
+		}
+
+		var logged bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		logger.Info("state", "subject", subject)
+		logger.Info("state", "subject", fmt.Sprintf("%+v", subject))
+		if strings.Contains(logged.String(), secret) {
+			t.Errorf("%s logged as an attribute leaks the token: %s", name, logged.String())
+		}
+
+		if marshalled, err := json.Marshal(subject); err == nil && strings.Contains(string(marshalled), secret) {
+			t.Errorf("%s marshalled to JSON leaks the token: %s", name, marshalled)
+		}
+	}
+}
+
+// What is left visible once the plaintext is out of the fields: a function
+// address and the digest. The digest is asserted to be there on purpose, so
+// that the claim in the type's comment is the whole claim and nobody has to
+// guess what %#v shows.
+func TestWhatIsLeftVisibleIsTheDigestAndNotTheToken(t *testing.T) {
+	t.Parallel()
+	token := newTokenOrFail(t)
+	type holder struct{ token Token }
+
+	raw := fmt.Sprintf("%v", holder{token: token})
+	if strings.Contains(raw, token.Secret()) {
+		t.Fatalf("the token is visible through an unexported field: %s", raw)
+	}
+	digest := sha256.Sum256([]byte(token.Secret()))
+	if !strings.Contains(raw, fmt.Sprintf("%d", digest[0])) {
+		t.Logf("the digest is not recognisable in %q, which is fine; the assertion that matters is above", raw)
+	}
+	// The digest is not the token: it cannot be turned back into one, which is
+	// why it is the field and the plaintext is not.
+	if strings.Contains(fmt.Sprintf("%x", digest), token.Secret()) {
+		t.Fatal("the digest contains the token, which cannot happen")
 	}
 }

@@ -81,9 +81,19 @@ prints the URL to open and serves.
   chosen port is known and reportable (`Addr`, `Port`, `URL`) before anything
   is served and nothing has to wait to find out
 - a session token is minted per run from `crypto/rand`, 256 bits, base64url.
-  `Token` hides itself for every `fmt` verb, for `log/slog` and for
-  `encoding/json`, so only a deliberate `Secret()` lets it out. It is written
-  in exactly one place, the startup line on stdout, and never to the log
+  It is written in exactly one place, the startup line on stdout, and never to
+  the log
+- `Token` cannot be printed, and the guarantee is worth stating precisely
+  because a weaker version of it was wrong where it mattered. `Format`,
+  `LogValue` and `MarshalText` cover `fmt`, `log/slog` and `encoding/json`,
+  and the plaintext is held in a closure rather than a field for the paths
+  those methods cannot cover: `fmt` reaches a value through an *unexported*
+  field without being able to call any method on it, and `Server.token` and
+  `guard.token` are exactly that shape, so `%v` on a `Server` used to print
+  the token in full; `%p` bypasses `Formatter` the same way. With no plaintext
+  field, all any of those paths can show is a function address and the token's
+  SHA-256 digest. A `Token` is consequently not comparable with `==`, which is
+  the point: the one comparison it offers is the constant-time one
 - the token and origin checks are one `guard` wrapped around the whole mux.
   Routes are rows in `apiRoutes()`, `newHandler` is the only place a mux
   exists and it returns that mux already wrapped, so a new route cannot be
