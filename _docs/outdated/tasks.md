@@ -7,8 +7,9 @@ reference; editing it changes nothing.
 
 Each task is groomed into the shape described in `_docs/task-template.md` on
 the issue itself, before anyone implements it. The two-field Goal/Description
-form below predates that template, so the issue bodies still carry the old
-shape until a PM grooms them.
+form below predates that template. All 47 have since been groomed on the
+issues themselves, and follow-up issues #48-#55 were filed for work moved out
+of scope during grooming.
 
 Derived from `_docs/outdated/plan.md`.
 
