@@ -16,32 +16,42 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-// parsePackage parses this package's non-test files. The test files are left
-// out on purpose: a test may import anything, and what matters is what the
-// shipped code does.
+// parsePackage parses this package's non-test files, keyed by file name. The
+// test files are left out on purpose: a test may import anything, including
+// the os this file needs to find them, and what matters is what the shipped
+// code does.
 func parsePackage(t *testing.T) (*token.FileSet, map[string]*ast.File) {
 	t.Helper()
-	fileSet := token.NewFileSet()
-	packages, err := parser.ParseDir(fileSet, ".", func(info fs.FileInfo) bool {
-		return !strings.HasSuffix(info.Name(), "_test.go")
-	}, parser.ParseComments)
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("parse this package: %v", err)
+		t.Fatalf("read this package's directory: %v", err)
 	}
-	parsed, found := packages["httpapi"]
-	if !found {
-		t.Fatal("this package did not parse as httpapi")
+	fileSet := token.NewFileSet()
+	files := make(map[string]*ast.File, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed, parseErr := parser.ParseFile(fileSet, name, nil, parser.ParseComments)
+		if parseErr != nil {
+			t.Fatalf("parse %s: %v", name, parseErr)
+		}
+		if parsed.Name.Name != "httpapi" {
+			t.Fatalf("%s is in package %s, not httpapi", name, parsed.Name.Name)
+		}
+		files[name] = parsed
 	}
-	if len(parsed.Files) < 2 {
-		t.Fatalf("only %d source files parsed, so this test is looking at the wrong thing", len(parsed.Files))
+	if len(files) < 2 {
+		t.Fatalf("only %d source files parsed, so this test is looking at the wrong thing", len(files))
 	}
-	return fileSet, parsed.Files
+	return fileSet, files
 }
 
 func importsOf(t *testing.T, file *ast.File) []string {

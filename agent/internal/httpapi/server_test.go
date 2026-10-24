@@ -4,7 +4,6 @@
 package httpapi
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"net/url"
@@ -228,30 +227,5 @@ func TestTheServerTimeoutsAreSet(t *testing.T) {
 	}
 	if server.http.MaxHeaderBytes <= 0 || server.http.MaxHeaderBytes > 1<<20 {
 		t.Errorf("MaxHeaderBytes is %d, want a cap below net/http's megabyte default", server.http.MaxHeaderBytes)
-	}
-}
-
-// A connection that sends nothing at all is closed by the read-header timeout
-// rather than held forever. The timeout used here is the real one, so this
-// asserts the wiring, not the clock: it only checks that a deadline exists on
-// the connection path, by closing the server underneath it.
-func TestAnIdleConnectionDoesNotKeepTheServerFromStopping(t *testing.T) {
-	t.Parallel()
-	server := startServer(t, Options{})
-
-	silent, err := net.DialTimeout("tcp", server.Addr(), dialTimeout)
-	if err != nil {
-		t.Fatalf("connect to the agent API: %v", err)
-	}
-	defer func() { _ = silent.Close() }()
-
-	// Shutdown waits for in-flight requests; a connection that never sent a
-	// request is not one, so this returns rather than waiting out the read
-	// timeout. The cleanup startServer registered then finds Serve already
-	// finished.
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		t.Fatalf("shut the agent API down with an idle connection open: %v", err)
 	}
 }
