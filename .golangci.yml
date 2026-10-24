@@ -1,0 +1,22 @@
+# The single golangci-lint configuration for the Go module, read from the repo
+# root so a developer and CI lint with the same rules.
+version: '2'
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
