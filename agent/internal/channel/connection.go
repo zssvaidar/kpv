@@ -49,6 +49,11 @@ type connection struct {
 	subscriptions map[PipelineID]struct{}
 	hungUp        bool
 	why           string
+	// whyIsDeliberate records whether why is a decision the agent made --
+	// the write timeout, an unanswered ping, a full queue, a command it
+	// would not read, a shutdown -- or the read loop simply noticing that
+	// the connection has ended. See hangUp for why the difference matters.
+	whyIsDeliberate bool
 }
 
 func newConnection(hub *Hub, ws *websocket.Conn) *connection {
@@ -115,9 +120,17 @@ func (c *connection) writeLoop() {
 			// would wait on it for as long as the client liked.
 			writeCtx, cancelWrite := context.WithTimeout(c.ctx, c.hub.options.WriteTimeout)
 			err := c.ws.Write(writeCtx, websocket.MessageText, frame)
+			// Whether this was our own deadline is asked of the context, not
+			// of the error. Cancelling a write closes the connection inside
+			// the library, so what comes back may be about the closed socket
+			// rather than about the deadline that closed it; the context is
+			// the one thing that knows, and only our deadline makes it
+			// DeadlineExceeded -- a hang-up from elsewhere cancels the parent
+			// and reads as Canceled.
+			timedOut := errors.Is(writeCtx.Err(), context.DeadlineExceeded)
 			cancelWrite()
 			if err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
+				if timedOut {
 					c.hangUp("the client did not read a message within the write timeout")
 				} else {
 					c.hangUp("a message could not be written to the client")
@@ -132,9 +145,14 @@ func (c *connection) writeLoop() {
 			// PingInterval+PongTimeout of it happening.
 			pingCtx, cancelPing := context.WithTimeout(c.ctx, c.hub.options.PongTimeout)
 			err := c.ws.Ping(pingCtx)
+			unanswered := errors.Is(pingCtx.Err(), context.DeadlineExceeded)
 			cancelPing()
 			if err != nil {
-				c.hangUp("the client did not answer a ping within the pong timeout")
+				if unanswered {
+					c.hangUp("the client did not answer a ping within the pong timeout")
+				} else {
+					c.hangUp("a ping could not be written to the client")
+				}
 				return
 			}
 		}
@@ -150,11 +168,10 @@ func (c *connection) readLoop() {
 		kind, data, err := c.ws.Read(c.ctx)
 		if err != nil {
 			// The ordinary end of a connection: the client closed it, or it
-			// was hung up on and this read was woken by that. The reason
-			// recorded first is the one that is kept, so a client that was
-			// disconnected for not keeping up does not have its reason
-			// overwritten by the read that noticed.
-			c.hangUp("the client went away")
+			// was hung up on and this read was woken by that. Either way the
+			// reason is a fallback, so the decision that caused it is what
+			// ends up in the log; see peerGone.
+			c.peerGone("the client went away")
 			return
 		}
 		if kind != websocket.MessageText {
@@ -263,21 +280,39 @@ func (c *connection) send(frame []byte) {
 	}
 }
 
-// hangUp closes the connection, recording why the first time it is called. It
-// is idempotent and safe from any goroutine: the loops call it, the hub calls
-// it on shutdown, and a publisher calls it through send.
+// hangUp closes the connection for a reason the agent decided on. It is
+// idempotent and safe from any goroutine: both loops call it, the hub calls it
+// on shutdown, and a publisher calls it through send.
 //
 // The socket is closed rather than closed down: no close frame is written. A
 // close frame would mean something other than the write loop writing to the
 // connection, and the status and reason it would carry are for the agent's log
 // rather than for a client being hung up on.
 func (c *connection) hangUp(why string) {
+	c.close(why, true)
+}
+
+// peerGone closes the connection because it has ended, which is the read
+// loop's ordinary exit.
+//
+// It is separate from hangUp because of a race that would otherwise put the
+// wrong reason in the log, and the log is the only place a disconnect is
+// explained. Closing a connection wakes both loops, so when the write loop
+// decides to hang up -- a write that timed out, a ping that went unanswered --
+// the read loop is woken by that same close and may get here first. Its reason
+// is a fallback: it is recorded when there is none, and replaced by the
+// decision that actually caused this, whichever order the two arrive in.
+func (c *connection) peerGone(why string) {
+	c.close(why, false)
+}
+
+func (c *connection) close(why string, deliberate bool) {
 	c.mu.Lock()
+	if c.why == "" || (deliberate && !c.whyIsDeliberate) {
+		c.why, c.whyIsDeliberate = why, deliberate
+	}
 	first := !c.hungUp
 	c.hungUp = true
-	if first {
-		c.why = why
-	}
 	c.mu.Unlock()
 	if !first {
 		return

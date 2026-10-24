@@ -182,6 +182,24 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 	}
 }
 
+// waitForLog waits for the log to say something, and fails with the whole log
+// when it does not.
+//
+// Why waiting is necessary rather than fussy: a connection takes itself out of
+// the hub as it stops, and the line explaining why it stopped is written just
+// after that, by the handler goroutine on its way out. So a test that has
+// watched the connection disappear has not necessarily seen the log yet.
+func (tc *testChannel) waitForLog(t *testing.T, phrase, what string) {
+	t.Helper()
+	deadline := time.Now().Add(patience)
+	for !strings.Contains(tc.logs.String(), phrase) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the log never said it was %s; it says:\n%s", what, tc.logs.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // A client receives the pipelines it asked for, and only those. The messages
 // are published interleaved so that cross-talk is a failure about order and
 // content rather than about a timeout: if A ever saw B's pipeline, A's second

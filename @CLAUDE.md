@@ -42,6 +42,19 @@ source, so a model change is a change to that file followed by
 - `schema/fixtures/pipelines.json` - the one set of valid and invalid
   fixtures, read by the Go tests and the Vitest tests alike
 
+`schema/channel.schema.json` is the second schema, and the same rules apply to
+it: the envelope the agent pushes over its WebSocket channel (#5), generated
+into `packages/schema/src/generated/channel-*.ts` and
+`agent/internal/channel/models_gen.go` plus the copy that package embeds, with
+shared fixtures in `schema/fixtures/channel-messages.json`. It is a separate
+file because the envelope is transport and not part of the pipeline model: it
+carries a pipeline id, it is not a pipeline. Keeping it separate is also what
+lets the channel's Go code live outside `internal/pipeline`, which matters
+because the HTTP boundary is not allowed to import that package until #6
+exists. The one thing the two schemas share is what a pipeline id looks like,
+and a `$ref` cannot cross files, so the pattern is written twice and
+`scripts/generate-schema.mjs` fails generation when the two copies drift.
+
 Generated output is committed, and `pnpm generate:check` regenerates it and
 fails on any diff. That is what catches a stale schema and a hand-edited
 generated file, so never edit anything under a generated path by hand.
@@ -143,6 +156,57 @@ prints the URL to open and serves.
   `source_test.go` asserts that, and the two claims a response cannot show:
   the token source is `crypto/rand` and the comparison is
   `subtle.ConstantTimeCompare` over digests, which does not leak length
+- `GET /api/channel` is the push channel (#5). It is registered by
+  `newHandler`, on the same mux, inside the same wrap, rather than being a row
+  in `apiRoutes()`: every row is a request-and-an-answer route and the table's
+  tests hold each one to answering `200` with a JSON object, which a handshake
+  is not. `channel_test.go` walks what `newHandler` registers and fails if
+  anything is registered that no test there covers, so the table's "every
+  route was tested" guarantee is not quietly narrowed
+- a refused upgrade answers the same uniform `404`. The library answers a
+  handshake it will not accept, and helpfully: `426` with the header it
+  wanted, `400` with the version it supports, `403` naming the origin it
+  rejected. `handshakeWriter` in `channel.go` passes a `101` through and turns
+  everything else -- any status, the headers the library had set, the
+  explanation it was writing, and writing nothing at all -- into that `404`
+- #58's fetch-metadata exception does not reach it, because that rule excludes
+  a request carrying an `Upgrade` header: a browser sends `Origin` on a
+  handshake, so the channel requires one through the allowlist like any
+  state-changing route
+
+The push channel
+
+`agent/internal/channel` is one WebSocket per client, the generated envelope on
+it, and a subscription per pipeline. `github.com/coder/websocket` is the
+library: no dependencies of its own, and a context on every read and write,
+which is what makes a bounded write a bounded write rather than a goroutine
+with a timer beside it.
+
+- authorization is not here. The token and the origin are the HTTP boundary's,
+  checked before the upgrade is accepted, and this package is never given a
+  credential -- which is the strongest form of "no credential in a payload"
+  and is what `source_test.go` asserts: it cannot import `httpapi`, and
+  nothing in it is named after a credential
+- every frame, message or ping, is written by the connection's write loop and
+  by nothing else. The library locks per frame, so a second writer would look
+  fine until the day a message went out in pieces; `serialization_test.go`
+  reads the package's syntax tree and fails if a write appears anywhere else
+- a publisher never blocks: queueing is a non-blocking send on a buffered
+  channel, and a client whose queue is full is disconnected rather than waited
+  for. Every write is bounded by `WriteTimeout`, so a client that stopped
+  reading cannot hold the write loop either
+- a dead peer is found within `DefaultPingInterval + DefaultPongTimeout`, 25
+  seconds, and the connection is closed. The intervals are `Options`, so a
+  test injects milliseconds instead of sitting out the real ones
+- closing is abrupt, by closing the socket: a close frame would be a second
+  thing writing to the connection, and the status it would carry is nothing
+  the agent owes a client it is hanging up on
+- `Shutdown` and `Close` on the HTTP server close the channel first, because a
+  hijacked connection is one `net/http` has forgotten about: it neither closes
+  a WebSocket nor waits for one
+- a message that will not serialize is logged and dropped, once, in `Publish`,
+  where it reaches no connection at all. A client that subscribed to nothing
+  receives nothing, so there is no broadcast to forget about
 
 Rules
 - TODO

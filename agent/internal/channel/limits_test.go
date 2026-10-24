@@ -34,7 +34,12 @@ func bulky(pipeline PipelineID) ChannelMessage {
 func TestAClientThatStopsReadingIsDisconnectedByTheWriteTimeout(t *testing.T) {
 	t.Parallel()
 	hub := startChannel(t, Options{
-		WriteTimeout:   brief,
+		// Short, but with room: a loaded runner must not be able to trip
+		// this on the acknowledgement below, which is a hundred bytes to a
+		// client that is reading. A blocked write trips it immediately all
+		// the same, because the client stops reading for good and the
+		// messages are far more than the sockets between them can hold.
+		WriteTimeout:   20 * brief,
 		OutboundBuffer: 1024,
 		PingInterval:   time.Hour,
 	})
@@ -52,9 +57,7 @@ func TestAClientThatStopsReadingIsDisconnectedByTheWriteTimeout(t *testing.T) {
 	}
 
 	waitFor(t, "the client that stopped reading to be disconnected", func() bool { return hub.Connections() == 0 })
-	if logged := hub.logs.String(); !strings.Contains(logged, "did not read a message within the write timeout") {
-		t.Fatalf("the client was disconnected without the log saying it was the write timeout:\n%s", logged)
-	}
+	hub.waitForLog(t, "did not read a message within the write timeout", "the write timeout")
 }
 
 // A client that falls behind its queue is disconnected for that, with no
@@ -79,9 +82,7 @@ func TestAClientThatFallsBehindIsDisconnected(t *testing.T) {
 	}
 
 	waitFor(t, "the client that fell behind to be disconnected", func() bool { return hub.Connections() == 0 })
-	if logged := hub.logs.String(); !strings.Contains(logged, "not keeping up") {
-		t.Fatalf("the client was disconnected without the log saying it had fallen behind:\n%s", logged)
-	}
+	hub.waitForLog(t, "not keeping up", "a queue that had filled up")
 }
 
 // A dead peer is found by the heartbeat and the connection is closed. The peer
@@ -100,16 +101,18 @@ func TestADeadPeerIsDetectedByTheHeartbeatAndDisconnected(t *testing.T) {
 		// Long, so that a write cannot be what ends this connection.
 		WriteTimeout: time.Hour,
 	})
-	client := hub.dial(t)
-	subscribe(t, client, "alpha")
-	// A coder/websocket client answers a ping from its read path, so a client
-	// that never reads never pongs. Nothing else about it changes: the socket
-	// stays open and the process stays alive.
+	// This client never reads anything at all, not even an acknowledgement:
+	// a coder/websocket client answers a ping from its read path, so a client
+	// that never reads never pongs. Nothing else about it changes -- the
+	// socket stays open and the process stays alive -- which is exactly what
+	// a slept laptop looks like from here. It subscribes to nothing, because
+	// a subscription would mean reading, and the heartbeat does not care
+	// whether a peer asked for anything.
+	_ = hub.dial(t)
+	waitFor(t, "the connection to be registered", func() bool { return hub.Connections() == 1 })
 
 	waitFor(t, "the dead peer to be disconnected", func() bool { return hub.Connections() == 0 })
-	if logged := hub.logs.String(); !strings.Contains(logged, "did not answer a ping") {
-		t.Fatalf("the dead peer was disconnected without the log saying it was the heartbeat:\n%s", logged)
-	}
+	hub.waitForLog(t, "did not answer a ping", "the heartbeat")
 }
 
 // The heartbeat does not disconnect a live peer. The same tiny intervals, many
@@ -226,9 +229,7 @@ func TestAClientCannotSubscribeToMorePipelinesThanTheLimit(t *testing.T) {
 
 	command(t, client, ChannelCommandNameSubscribe, "one-too-many")
 	waitFor(t, "the connection to be closed", func() bool { return hub.Connections() == 0 })
-	if logged := hub.logs.String(); !strings.Contains(logged, "more pipelines than one connection may have") {
-		t.Fatalf("the connection was closed without the log saying why:\n%s", logged)
-	}
+	hub.waitForLog(t, "more pipelines than one connection may have", "the subscription limit")
 }
 
 // Closing the hub disconnects every client and leaves nothing running: when
