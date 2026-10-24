@@ -71,5 +71,39 @@ covers both formats, and the model is the generated one.
   then a rename, and no map iteration in the output, so the same pipeline
   always produces the same bytes. Comments are not preserved
 
+The local HTTP API
+
+`agent/internal/httpapi` is the agent's HTTP server: standard library
+`net/http` and `http.ServeMux`, no framework. `agent/cmd/agent` binds it,
+prints the URL to open and serves.
+
+- it binds `127.0.0.1` on port 0, and `New` binds before it returns, so the
+  chosen port is known and reportable (`Addr`, `Port`, `URL`) before anything
+  is served and nothing has to wait to find out
+- a session token is minted per run from `crypto/rand`, 256 bits, base64url.
+  `Token` hides itself for every `fmt` verb, for `log/slog` and for
+  `encoding/json`, so only a deliberate `Secret()` lets it out. It is written
+  in exactly one place, the startup line on stdout, and never to the log
+- the token and origin checks are one `guard` wrapped around the whole mux.
+  Routes are rows in `apiRoutes()`, `newHandler` is the only place a mux
+  exists and it returns that mux already wrapped, so a new route cannot be
+  registered outside the checks
+- a request presents the token as `Authorization: Bearer` or in the `token`
+  query parameter, which is how the startup URL carries it to the browser
+- the `Origin` header is checked against an exact allowlist: the agent's own
+  origin plus anything in `Options.AllowedOrigins`. A request with no `Origin`
+  is rejected; `originRequired` in `origin.go` is the rule and says why
+- every failed check answers the same 404 with the same body and headers, the
+  same answer an unauthorized request to a path that does not exist gets, so
+  nothing can tell the three failures apart. Both checks run before either is
+  acted on, so the timing does not tell them apart either
+- read, read-header, write and idle timeouts are set, and the header size is
+  capped well below `net/http`'s 1MB default
+- no route here reads the filesystem: `internal/pipeline` is deliberately not
+  wired up, because a route that reads a path needs the path guard in #6.
+  `source_test.go` asserts that, and the two claims a response cannot show:
+  the token source is `crypto/rand` and the comparison is
+  `subtle.ConstantTimeCompare` over digests, which does not leak length
+
 Rules
 - TODO
