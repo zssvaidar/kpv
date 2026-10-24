@@ -300,8 +300,8 @@ func TestMalformedFilesFailWithAStructuredError(t *testing.T) {
 	valid := func() string {
 		return stepsInOrder
 	}
-	replace := func(old, new string) string {
-		return strings.Replace(valid(), old, new, 1)
+	replace := func(before, after string) string {
+		return strings.Replace(valid(), before, after, 1)
 	}
 
 	for _, testCase := range []struct {

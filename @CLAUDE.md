@@ -50,5 +50,26 @@ The generators are pinned: `go-jsonschema` as a tool directive in
 `agent/go.mod`, `json-schema-to-typescript` and `json-schema-to-zod` as root
 devDependencies.
 
+Reading and writing `pipeline.yaml`
+
+`agent/internal/pipeline` reads and writes a pipeline file. YAML is bridged
+through JSON (`YAMLToJSON`, `JSONToYAML`) so the one JSON Schema validator
+covers both formats, and the model is the generated one.
+
+- `pipeline.Store` is given a path and reads or writes it; `LoadFile` and
+  `SaveFile` are the convenience wrappers. Which directory a pipeline lives
+  in is #48, and `Store.resolve` is the single seam #6's path guard plugs
+  into, so a guard arrives without reshaping callers
+- failures are one `*pipeline.FileError`: a `Kind` to branch on, the
+  offending field as a JSON Pointer, a line and column, and the schema
+  violations with the same pointers `validate.go` reports
+- the reader is strict where YAML is permissive: a duplicate key, a file with
+  no document in it, more than one document, a non-string key and a tag
+  outside the JSON data model are all rejected. The parser is
+  `gopkg.in/yaml.v3`, chosen on measurements written down in `yaml.go`
+- writing is atomic and reproducible: a temporary file in the same directory
+  then a rename, and no map iteration in the output, so the same pipeline
+  always produces the same bytes. Comments are not preserved
+
 Rules
 - TODO
