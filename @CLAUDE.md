@@ -97,7 +97,15 @@ prints the URL to open and serves.
 - the token and origin checks are one `guard` wrapped around the whole mux.
   Routes are rows in `apiRoutes()`, `newHandler` is the only place a mux
   exists and it returns that mux already wrapped, so a new route cannot be
-  registered outside the checks
+  registered outside the checks. Two assertions keep that true from both
+  ends: no `Handle` call outside `newHandler`, and `http.Server.Handler` is
+  exactly `newHandler(g, apiRoutes())`, so a hand-rolled router or a wrapper
+  around the guarded handler fails the suite rather than shipping
+- `DisableGeneralOptionsHandler` is set, because `net/http` answers
+  `OPTIONS *` from its own built-in handler before `Server.Handler` is
+  consulted and an unauthorized caller got a `200` out of it. The two shapes
+  it still answers ahead of any handler, `400` with no `Host` and `431` over
+  the header cap, cannot be taken back and distinguish none of the checks
 - a request presents the token as `Authorization: Bearer` or in the `token`
   query parameter, which is how the startup URL carries it to the browser
 - the `Origin` header is checked against an exact allowlist: the agent's own

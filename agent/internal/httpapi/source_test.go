@@ -287,3 +287,71 @@ func TestOnlyNewHandlerBuildsAMuxAndItWrapsIt(t *testing.T) {
 		t.Errorf("newHandler has %d return statements, want one, so there is one thing it can hand back", returned)
 	}
 }
+
+// What the server serves. The test above makes it impossible to register a
+// route outside the guard; this one makes it impossible to serve a handler
+// that is not the guarded one, which is the other half of "the checks cannot
+// be forgotten". Without it, replacing the Handler field with a hand-rolled
+// router that never calls .Handle would serve an unguarded path with the whole
+// suite still green.
+func TestTheServedHandlerIsExactlyTheGuardedOne(t *testing.T) {
+	t.Parallel()
+	fileSet, files := parsePackage(t)
+
+	// The one expression allowed to be the served handler. It is compared as
+	// written, so anything wrapping it, replacing it, or adding to it fails.
+	const guardedHandler = "newHandler(g, apiRoutes())"
+
+	var servers, assignments []string
+	for name, file := range files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.CompositeLit:
+				if typed.Type == nil {
+					// An element of a slice or map literal, which spells its
+					// type once on the outside: nothing to print here.
+					return true
+				}
+				if source(t, fileSet, typed.Type) != "http.Server" {
+					return true
+				}
+				servers = append(servers, name)
+				for _, element := range typed.Elts {
+					field, ok := element.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					if key, ok := field.Key.(*ast.Ident); !ok || key.Name != "Handler" {
+						continue
+					}
+					written := source(t, fileSet, field.Value)
+					assignments = append(assignments, written)
+					if written != guardedHandler {
+						t.Errorf("%s serves %q as the handler, want exactly %q; anything else can bypass the guard", name, written, guardedHandler)
+					}
+				}
+			case *ast.AssignStmt:
+				// An assignment to a Handler field after the fact would
+				// replace the guarded handler just as effectively.
+				for _, target := range typed.Lhs {
+					if written := source(t, fileSet, target); strings.HasSuffix(written, ".Handler") {
+						t.Errorf("%s assigns to %s after construction; the served handler is set once, in New", name, written)
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	if len(servers) != 1 {
+		t.Fatalf("there are %d http.Server literals in this package, want exactly one: %v", len(servers), servers)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("the http.Server literal sets Handler %d times, want once: %v", len(assignments), assignments)
+	}
+	// A nil Handler is the worst case of all: net/http falls back to
+	// http.DefaultServeMux, which anything in the process can register on.
+	if assignments[0] == "nil" {
+		t.Fatal("the server serves a nil handler, which means http.DefaultServeMux")
+	}
+}

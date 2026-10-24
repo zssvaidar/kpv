@@ -383,3 +383,46 @@ func TestAConfiguredOriginThatIsNotAnOriginFailsStartup(t *testing.T) {
 		}
 	}
 }
+
+// The same claim as the structural test, made against the running server: the
+// handler the server actually serves rejects an unauthorized request to any
+// path at all, and serves an authorized one. A handler swapped for something
+// that answers without the checks fails here.
+func TestTheHandlerTheServerServesIsGuarded(t *testing.T) {
+	t.Parallel()
+	server := startServer(t, Options{})
+
+	served := server.http.Handler
+	if served == nil {
+		t.Fatal("the server serves a nil handler, which means http.DefaultServeMux")
+	}
+
+	// The asterisk form is not here because it is not a path: it is sent as
+	// raw bytes in bypass_test.go, where net/http's own handling of it is
+	// what matters.
+	paths := []string{"/", "/api", "/api/health", "/api/version", "/anything", "/api/does-not-exist"}
+	for _, r := range apiRoutes() {
+		_, path := methodAndPathOf(t, r.pattern)
+		paths = append(paths, path)
+	}
+	for _, path := range paths {
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodOptions, http.MethodHead, http.MethodDelete} {
+			recorded := httptest.NewRecorder()
+			served.ServeHTTP(recorded, httptest.NewRequest(method, "http://"+server.Addr()+path, nil))
+			if recorded.Code != rejectionStatus || recorded.Body.String() != rejectionBody {
+				t.Errorf("the served handler answered an unauthorized %s %s with %d %q", method, path, recorded.Code, recorded.Body.String())
+			}
+		}
+	}
+
+	// The control: the same handler does serve an authorized request, so the
+	// rejections above are not a handler that refuses everything.
+	authorized := httptest.NewRequest(http.MethodGet, "http://"+server.Addr()+"/api/health", nil)
+	authorized.Header.Set("Origin", server.URL())
+	authorized.Header.Set(authorizationHeader, "Bearer "+server.Token().Secret())
+	recorded := httptest.NewRecorder()
+	served.ServeHTTP(recorded, authorized)
+	if recorded.Code != http.StatusOK {
+		t.Fatalf("the served handler answered an authorized request %d %q", recorded.Code, recorded.Body.String())
+	}
+}
