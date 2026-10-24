@@ -118,6 +118,12 @@ type request struct {
 	// HTTP/1.1", which net/http used to answer out of its own built-in
 	// handler before Server.Handler was ever consulted.
 	asterisk bool
+	// headers are any further header values to add, each name with every
+	// value it should carry. It is how a test sends the fetch metadata a
+	// browser attaches, and more than one value where that is the case worth
+	// asserting about. nil adds nothing, so every case written before this
+	// field existed sends exactly what it sent before.
+	headers http.Header
 }
 
 func (ts *testServer) do(t *testing.T, want request) response {
@@ -149,6 +155,11 @@ func (ts *testServer) do(t *testing.T, want request) response {
 	}
 	for _, origin := range want.origins {
 		r.Header.Add("Origin", origin)
+	}
+	for name, values := range want.headers {
+		for _, value := range values {
+			r.Header.Add(name, value)
+		}
 	}
 
 	if want.asterisk {
