@@ -44,6 +44,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Everything derived from schema/pipeline.schema.json is committed, so
+      # this regenerates it and fails on any diff. That catches both a schema
+      # change nobody regenerated for and a hand-edited generated file.
+      - name: Check the generated schema output is not stale
+        run: pnpm run generate:check
+
       # The same four root scripts a developer runs.
       - run: pnpm run lint
 
