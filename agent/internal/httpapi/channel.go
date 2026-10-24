@@ -39,6 +39,14 @@ const channelPattern = "GET /api/channel"
 // in the query parameter; the guard already accepts it there, which is how the
 // startup URL hands it to the page in the first place. Nothing extra is needed
 // here, and nothing extra is done.
+//
+// One thing that is not done here and would be a bug if it were needed: the
+// server's read and write timeouts are not cleared for this connection. A
+// WebSocket outlives both of them by design, and a deadline left on the socket
+// would kill it at the write timeout. net/http clears the deadlines itself
+// when a connection is hijacked (hijackLocked calls SetDeadline with the zero
+// time), so there is nothing to undo; a channel that died after exactly
+// writeTimeout would be this assumption being wrong.
 func (g *guard) channelRoute() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if g.channel == nil {

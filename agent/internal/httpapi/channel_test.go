@@ -612,6 +612,45 @@ func TestShuttingTheServerDownDisconnectsChannelClients(t *testing.T) {
 	}
 }
 
+// A channel that has been closed answers the route uniformly too, and this is
+// the case that would otherwise be the worst of them: the channel refuses
+// before the library is reached, so nothing has been written, and a handler
+// that returns having written nothing gets net/http's empty 200 -- a
+// distinguishable answer, and a successful-looking one.
+//
+// It is built by hand because a shut-down server stops accepting connections
+// before a request could reach the route at all, which is the only way this
+// state arises in the agent itself.
+func TestAClosedChannelRejectsTheRouteUniformly(t *testing.T) {
+	t.Parallel()
+	token, err := NewToken()
+	if err != nil {
+		t.Fatalf("mint a token: %v", err)
+	}
+	origins, err := newOriginPolicy(1234, nil)
+	if err != nil {
+		t.Fatalf("build the origin policy: %v", err)
+	}
+	hub := channel.New(channel.Options{})
+	hub.Close()
+	handler := newHandler(&guard{token: token, origins: origins, logger: discardLogger(), channel: hub}, apiRoutes())
+
+	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:1234/api/channel", nil)
+	r.Header.Set(authorizationHeader, "Bearer "+token.Secret())
+	r.Header.Set("Origin", "http://127.0.0.1:1234")
+	for name, value := range upgradeHeaders(t) {
+		r.Header[name] = value
+	}
+	recorded := httptest.NewRecorder()
+	handler.ServeHTTP(recorded, r)
+	if recorded.Code != rejectionStatus || recorded.Body.String() != rejectionBody {
+		t.Fatalf("a closed channel answered %d %q, want the uniform rejection", recorded.Code, recorded.Body.String())
+	}
+	if recorded.Header().Get("Content-Type") != rejectionContentType {
+		t.Fatalf("a closed channel answered with the headers %v", recorded.Header())
+	}
+}
+
 // A server built with no channel answers the route the way it answers
 // everything else. Only a test builds one, and this is that test: the
 // alternative to answering uniformly would be a nil dereference, which is a
