@@ -22,19 +22,19 @@ jobs:
     name: Lint, typecheck, test and build both toolchains
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Node and pnpm versions come from .nvmrc and the packageManager field,
       # so CI and a developer read the same pins.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       # The Go version comes from the go directive in agent/go.mod.
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.mod
