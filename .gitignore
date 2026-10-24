@@ -1,5 +1,27 @@
+# Node / pnpm
 node_modules/
+.pnpm-store/
+
+# TypeScript build output
 dist/
+*.tsbuildinfo
+
+# Generated schema output (produced by #2, never committed)
+packages/schema/src/generated/
+
+# Go build output
+/agent/bin/
+/agent/agent
+*.exe
+*.test
+*.out
+
+# Test and tool caches
+coverage/
+.vitest/
+.eslintcache
+
+# Local environment
 .env
 .env.*
 !.env.example
