@@ -1,0 +1,138 @@
+{
+  "$comment": "The one set of channel-envelope fixtures. Both toolchains read this file: agent/internal/channel/fixtures_test.go and packages/schema/src/channel-fixtures.test.ts. Never copy it per language. The contract each case states is acceptance or rejection, and nothing finer: the envelope is three properties, so the pointer-for-pointer assertions the pipeline fixtures make would say no more than the case's own name does. Each side checks the envelope against the authoritative JSON Schema and against what that schema was generated into -- the Go structs in the agent, the Zod schema in @kpv/schema -- so a generator that drifted from the schema fails here.",
+  "valid": [
+    {
+      "name": "a-log-message",
+      "why": "The shape #34 will publish: a kind, the pipeline it is about, and a payload with the line in it.",
+      "message": {
+        "kind": "log",
+        "pipelineId": "orders-to-billing",
+        "payload": {
+          "line": "consumer started",
+          "stream": "stdout"
+        }
+      }
+    },
+    {
+      "name": "a-status-message",
+      "why": "The shape #35 will publish. The payload is open, so a status is whatever that issue decides it is.",
+      "message": {
+        "kind": "status",
+        "pipelineId": "orders-to-billing",
+        "payload": {
+          "state": "running",
+          "since": "2026-01-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "an-acknowledgement",
+      "why": "What the agent sends when a client's subscription comes into force. Its payload is empty, which is still an object: a client never has to tell an absent payload from an empty one.",
+      "message": {
+        "kind": "subscribed",
+        "pipelineId": "orders-to-billing",
+        "payload": {}
+      }
+    },
+    {
+      "name": "an-unsubscribe-acknowledgement",
+      "why": "The same, for the other command.",
+      "message": {
+        "kind": "unsubscribed",
+        "pipelineId": "a",
+        "payload": {}
+      }
+    },
+    {
+      "name": "a-nested-payload",
+      "why": "A payload may be any JSON object, nesting included, because what goes in one belongs to the issue that publishes it.",
+      "message": {
+        "kind": "log",
+        "pipelineId": "A_pipeline-1",
+        "payload": {
+          "lines": ["one", "two"],
+          "counts": {
+            "stdout": 2,
+            "stderr": 0
+          },
+          "truncated": false,
+          "cause": null
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "no-kind",
+      "why": "A client branches on the kind, so a message without one is not a message it can read.",
+      "message": {
+        "pipelineId": "orders-to-billing",
+        "payload": {}
+      }
+    },
+    {
+      "name": "a-kind-that-does-not-exist",
+      "why": "The kinds are a closed set. A kind nobody defined would reach a client as something to ignore or guess at.",
+      "message": {
+        "kind": "deployProgress",
+        "pipelineId": "orders-to-billing",
+        "payload": {}
+      }
+    },
+    {
+      "name": "no-pipeline-id",
+      "why": "Every message is about exactly one pipeline, which is also the subscription it is delivered on.",
+      "message": {
+        "kind": "log",
+        "payload": {
+          "line": "consumer started"
+        }
+      }
+    },
+    {
+      "name": "a-pipeline-id-no-pipeline-could-have",
+      "why": "The id has to be the identifier the pipeline model defines, so that a message cannot name something no pipeline can be called.",
+      "message": {
+        "kind": "log",
+        "pipelineId": "../../etc/passwd",
+        "payload": {}
+      }
+    },
+    {
+      "name": "an-empty-pipeline-id",
+      "why": "The empty string is not an identifier either.",
+      "message": {
+        "kind": "log",
+        "pipelineId": "",
+        "payload": {}
+      }
+    },
+    {
+      "name": "no-payload",
+      "why": "The payload is required even when it is empty, so that a client never has to tell an absent payload from an empty one.",
+      "message": {
+        "kind": "log",
+        "pipelineId": "orders-to-billing"
+      }
+    },
+    {
+      "name": "a-payload-that-is-not-an-object",
+      "why": "A payload is an object. A string or a list would make every consumer check the type before reading it.",
+      "message": {
+        "kind": "log",
+        "pipelineId": "orders-to-billing",
+        "payload": "consumer started"
+      }
+    },
+    {
+      "name": "a-property-the-envelope-does-not-have",
+      "why": "The envelope is closed, so a sender that invented a property is told rather than quietly having it dropped.",
+      "message": {
+        "kind": "log",
+        "pipelineId": "orders-to-billing",
+        "payload": {},
+        "sequence": 7
+      }
+    }
+  ]
+}

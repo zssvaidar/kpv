@@ -88,8 +88,6 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) error {
 		connection.hangUp("the channel closed while the connection was being set up")
 		return &ChannelError{Op: "serve", Kind: KindClosed, Message: "the channel closed while the handshake was in flight"}
 	}
-	defer h.remove(connection)
-
 	h.logger.Debug("a channel client connected", "connections", h.Connections())
 	connection.run()
 	h.logger.Debug("a channel client disconnected", "reason", connection.reason())
@@ -162,7 +160,7 @@ func (h *Hub) Close() {
 }
 
 // add registers a connection, reporting false when the hub has closed in the
-// meantime.
+// meantime. A connection removes itself when it stops; see run.
 func (h *Hub) add(c *connection) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()

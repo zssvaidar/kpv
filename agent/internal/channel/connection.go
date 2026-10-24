@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -67,7 +68,12 @@ func newConnection(hub *Hub, ws *websocket.Conn) *connection {
 // run drives the connection until the client is gone, on the caller's
 // goroutine. Exactly one goroutine is started: the write loop.
 func (c *connection) run() {
+	// Order matters, and defers run last-registered-first: the connection
+	// takes itself out of the hub before it says it has finished, so a
+	// shutdown that waited for it also knows it is gone, rather than finding
+	// it in the map for another instant.
 	defer close(c.finished)
+	defer c.hub.remove(c)
 	// Belt and braces: every path out of the read loop hangs up, which
 	// cancels this already. A context that is never cancelled is a leak of a
 	// different kind.
@@ -155,11 +161,8 @@ func (c *connection) readLoop() {
 			c.hangUp("the client sent a frame that is not a command")
 			return
 		}
-		var command ChannelCommand
-		// The generated unmarshaller is the validation: it refuses a missing
-		// field, an unknown property, a command name that is not one of the
-		// two, and a pipeline id that is not a legal identifier.
-		if err := json.Unmarshal(data, &command); err != nil {
+		command, err := readCommand(data)
+		if err != nil {
 			c.hangUp("the client sent something that is not a command")
 			return
 		}
@@ -167,6 +170,44 @@ func (c *connection) readLoop() {
 			return
 		}
 	}
+}
+
+// strictCommand is a plain copy of the generated command type, which is to
+// say: the same fields, without the generated UnmarshalJSON on the struct
+// itself. encoding/json ignores DisallowUnknownFields for a type that defines
+// its own unmarshaller, so this is what a property the schema does not have is
+// refused through. The field types keep their own generated unmarshallers, so
+// the command name is still held to the two names and the pipeline id to the
+// identifier pattern.
+type strictCommand ChannelCommand
+
+// readCommand decodes one command, strictly.
+//
+// The bytes are read twice because the two passes refuse different things and
+// neither can refuse both:
+//
+//   - into strictCommand, with unknown properties and anything trailing the
+//     JSON value refused. A client that sends a property it believes means
+//     something should be told it does not, rather than quietly getting a
+//     plain subscription.
+//   - into the generated ChannelCommand, which is where a required property
+//     that is missing is refused. The generated unmarshaller is the schema's
+//     own rules, which is why the validation is not written out here.
+func readCommand(data []byte) (ChannelCommand, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var strict strictCommand
+	if err := decoder.Decode(&strict); err != nil {
+		return ChannelCommand{}, err
+	}
+	if decoder.More() {
+		return ChannelCommand{}, errors.New("a command is one JSON object and nothing after it")
+	}
+	var command ChannelCommand
+	if err := json.Unmarshal(data, &command); err != nil {
+		return ChannelCommand{}, err
+	}
+	return command, nil
 }
 
 // apply carries out one command, reporting whether the connection survives it.
