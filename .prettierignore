@@ -1,0 +1,8 @@
+node_modules/
+dist/
+pnpm-lock.yaml
+packages/schema/src/generated/
+
+# Prose owned by the team process, not formatted as code
+_docs/
+@CLAUDE.md
