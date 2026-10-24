@@ -111,12 +111,27 @@ prints the URL to open and serves.
 - the `Origin` header is checked against an exact allowlist: the agent's own
   origin plus anything in `Options.AllowedOrigins`. A request with no `Origin`
   is rejected, fail closed; `originRequired` in `origin.go` is the rule and
-  says why. Note what a browser really does: it sends `Origin` on every
-  cross-origin request and on a same-origin request that is not `GET`/`HEAD`,
-  so a same-origin `GET` carries none. That matters once the agent serves its
-  own page, and whether an absent `Origin` should then be accepted on a valid
-  token, or `Sec-Fetch-Site` keyed on instead, is #58 and deliberately not
-  decided in #4
+  says why. What a browser really does: it sends `Origin` on a request whose
+  mode is CORS, on any request whose method is not `GET`/`HEAD`, and on a
+  WebSocket handshake. It sends none on a same-origin `GET` -- and none on a
+  *cross-origin no-CORS* `GET` either, so an `<img>`, `<script>`, `<iframe>`
+  or navigation a hostile page drives arrives here with no `Origin` at all
+- #58 decided the one exception, and it keys on `Sec-Fetch-Site` rather than
+  on `Origin` being absent, precisely because absence does not mean "not
+  hostile". With no `Origin` header, a request is accepted when
+  `Sec-Fetch-Site` is exactly `same-origin` (the agent's own page, which is
+  the only document this origin can serve) or `none` (user-initiated, which no
+  page can cause: the startup URL being opened). A page cannot set that
+  header, it is a forbidden header name, and it cannot be laundered through a
+  redirect, because it is computed over the whole chain and downgraded to the
+  least trusted value in it. The exception is narrowed to what a browser
+  really sends: `GET`/`HEAD` only, one header value only, never an upgrade, and
+  the token is still required because the guard conjoins both checks. So a
+  state-changing route gets no relaxation (its same-origin request carries an
+  `Origin`) and #5's handshake gets none. A client that sends neither header
+  is rejected, which is `curl`, any script, and a browser older than fetch
+  metadata; `fetchSiteVouches` in `origin.go` is the rule, the two values, the
+  narrowing and the trade-off accepted
 - every failed check answers the same 404 with the same body and headers, the
   same answer an unauthorized request to a path that does not exist gets, so
   nothing can tell the three failures apart. Both checks run before either is
