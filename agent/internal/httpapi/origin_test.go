@@ -1,46 +1,46 @@
-// The rule for a request that carries no Origin header, and the gap this task
-// exists to close.
+// The rule for a request that carries no Origin header: what is accepted, and
+// everything near it that is not.
 //
-// THE PIN. The test below asserts the behaviour as it is before the fix: the
-// request a page served from the agent's own origin makes -- a GET with the
-// session token, no Origin header, and the fetch metadata a browser attaches
-// to its own page's request -- is rejected. It passes at this commit, which is
-// what makes the fix demonstrably a fix: once the rule changes, this test has
-// to fail, and the commit that changes the rule is the commit that turns this
-// assertion round.
+// THE PIN, and how to re-run it. The first test below asserted the opposite of
+// what it asserts now. At commit fdd9719, before the rule changed, it required
+// the page's own fetch -- a GET with the session token, no Origin, and the
+// fetch metadata a browser attaches -- to be rejected, and it passed. Against
+// the fixed code that same test fails, on both routes:
 //
-// Nothing here is a wish. Every case is the request shape a browser really
-// sends, per the Fetch standard: no Origin on a same-origin GET, and
-// Sec-Fetch-Site on every request a browser makes.
+//	the page's own fetch of /api/health was answered 200 "{\"status\":\"ok\"}\n",
+//	want the uniform rejection; the gap this task closes is no longer there to close
+//
+// which is what makes this a fix rather than a claim. `git show fdd9719` is the
+// pinned version.
+//
+// Nothing here is a wish about browsers. Every case is a request shape the
+// Fetch standard says a browser really sends, or raw bytes a hostile client
+// really can send.
 
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
 
 // pageFetch is the request the agent's own page makes once it is served from
-// the agent's own origin: the token in the Authorization header, no Origin,
-// and the fetch metadata the browser attaches and the page cannot.
+// the agent's own origin: the token in the Authorization header, no Origin
+// header, and the fetch metadata the browser attaches and the page cannot.
 func (ts *testServer) pageFetch(path string) request {
 	return request{
 		path:    path,
 		token:   ts.Token().Secret(),
-		headers: http.Header{"Sec-Fetch-Site": {"same-origin"}},
+		headers: http.Header{secFetchSiteHeader: {"same-origin"}},
 	}
 }
 
-// The gap, pinned: the page's own fetch is rejected today, on every route the
-// agent serves, with the same answer an unauthorized stranger gets.
-func TestTheSameOriginPageFetchIsRejectedToday(t *testing.T) {
+// The gap, closed: the page's own fetch is answered on every route the agent
+// serves, with no Origin header on the request.
+func TestThePageOwnFetchIsAnsweredWithNoOrigin(t *testing.T) {
 	t.Parallel()
 	server := startServer(t, Options{})
-
-	stranger := server.do(t, request{})
-	if stranger.Status != rejectionStatus {
-		t.Fatalf("an unauthorized request answered %d, so this test is not measuring against the rejection: %s", stranger.Status, stranger)
-	}
 
 	routes := apiRoutes()
 	if len(routes) == 0 {
@@ -49,12 +49,25 @@ func TestTheSameOriginPageFetchIsRejectedToday(t *testing.T) {
 	for _, r := range routes {
 		_, path := methodAndPathOf(t, r.pattern)
 		answer := server.do(t, server.pageFetch(path))
-		if answer.Status != rejectionStatus || answer.Body != rejectionBody {
-			t.Errorf("the page's own fetch of %s was answered %d %q, want the uniform rejection; the gap this task closes is no longer there to close", path, answer.Status, answer.Body)
+		if answer.Status != http.StatusOK {
+			t.Errorf("the page's own fetch of %s was answered %d, want 200: %s", path, answer.Status, answer)
 			continue
 		}
-		if answer != stranger {
-			t.Errorf("the page's own fetch of %s is told apart from an unauthorized stranger:\n%s\n\nversus\n\n%s", path, answer, stranger)
+		var body map[string]string
+		if err := json.Unmarshal([]byte(answer.Body), &body); err != nil {
+			t.Errorf("the page's own fetch of %s answered %q, which is not JSON: %v", path, answer.Body, err)
+			continue
 		}
+		if len(body) == 0 {
+			t.Errorf("the page's own fetch of %s answered an empty object", path)
+		}
+	}
+
+	// The same shape with the request the user's own navigation makes: no
+	// document initiated it, so no page could have caused it.
+	navigation := server.pageFetch("/api/health")
+	navigation.headers = http.Header{secFetchSiteHeader: {"none"}}
+	if answer := server.do(t, navigation); answer.Status != http.StatusOK {
+		t.Errorf("a user-initiated request with the token and no Origin was answered %d, want 200: %s", answer.Status, answer)
 	}
 }

@@ -39,7 +39,7 @@ func (g *guard) wrap(next http.Handler) http.Handler {
 		// would short-circuit, so the results are computed into variables
 		// first and only then combined.
 		tokenOK := g.token.matches(presentedToken(r))
-		originOK := g.origins.allows(r.Header.Values("Origin"))
+		originOK := g.origins.allowsRequest(r)
 		if !tokenOK || !originOK {
 			// Which of the two failed is deliberately not recorded, not even
 			// in the log, so that a log the operator pastes somewhere cannot

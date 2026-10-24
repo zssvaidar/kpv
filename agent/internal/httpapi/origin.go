@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -17,40 +18,149 @@ type originPolicy struct {
 	order []string
 }
 
+// originHeader is the header the allowlist is checked against.
+// secFetchSiteHeader is the fetch metadata that decides the one case where
+// that header is absent, and upgradeHeader is what keeps that case away from a
+// protocol upgrade.
+const (
+	originHeader       = "Origin"
+	secFetchSiteHeader = "Sec-Fetch-Site"
+	upgradeHeader      = "Upgrade"
+)
+
 // The rule for a request that carries no Origin header at all.
 //
 // It is rejected: absence is treated as a disallowed origin, not as
-// permission. The premise matters as much as the rule, so it is stated as the
-// specification has it rather than as it is convenient to remember.
+// permission. There is one exception, fetchSiteVouches below, and it is an
+// exception for a request the browser itself vouches for -- not a rule that
+// absence is permission.
 //
-// What a browser actually sends: it attaches Origin to every cross-origin
-// request, and to a same-origin request whose method is not GET or HEAD. It
-// does not attach one to a same-origin GET. So an absent Origin means one of
-// three things: a client that is not a browser, a same-origin GET from a page
-// the agent itself serves, or something that stripped the header. It does not
-// mean a cross-origin request: those always carry one.
+// The premise matters as much as the rule, so it is stated as the Fetch
+// standard has it rather than as it is convenient to remember. A browser
+// attaches Origin to a request whose mode is CORS, which is every fetch() and
+// XHR a page makes to another origin; to a request whose method is not GET or
+// HEAD, same-origin ones included; and to a WebSocket handshake. It attaches
+// none to a same-origin GET or HEAD.
 //
-// Why reject anyway:
+// And -- this is the part that decides the rule -- it attaches none to a
+// *cross-origin* no-CORS GET either. A hostile page's <img src>, <script src>,
+// <link>, <iframe src> and any top-level navigation it drives are all GETs to
+// this socket with no Origin header on them. So an absent Origin does not mean
+// "not from a hostile page": it is the shape the oldest cross-site attacks
+// have. An earlier version of this comment claimed the opposite, that a
+// cross-origin request always carries an Origin, and it is wrong for exactly
+// the requests an attacker can make without any cooperation from the user.
+//
+// Why absence is rejected, when the token is required as well:
 //
 //   - The attack the allowlist exists to stop is a page on some other origin,
-//     in the user's browser, making requests to this loopback socket. Such a
-//     request carries an Origin by construction and a disallowed one, so the
-//     allowlist rejects it whatever the rule for absence is. Rejecting absence
-//     buys nothing there; it is about everything else.
+//     in the user's browser, reaching this loopback socket. Its CORS fetches
+//     carry a disallowed Origin and the allowlist rejects them. Its no-CORS
+//     GETs and the navigations it drives carry no Origin, and this rule
+//     rejects them. Between the two that is the class, which is why "no
+//     Origin, but a valid token" is not the rule adopted here: it would admit
+//     the second half of it.
 //   - Treating absence as permission turns one omitted header into a way round
 //     the check for anything that can reach the socket: a client holding a
 //     leaked token would rather send no Origin than a wrong one, and a rule
 //     that rewards that is not a check. So: fail closed.
-//   - The one legitimate no-Origin browser request, a same-origin GET, does
-//     not exist yet. The agent serves no page of its own: #4 adds no route
-//     that could, and nothing here reads the filesystem.
 //
-// The cost, knowingly: a deliberate caller such as curl has to set the header,
-// and once the agent does serve its own page, that page's same-origin GET
-// would be rejected with nothing in front of it to supply an Origin. Which way
-// that should go -- accept an absent Origin when the token is valid, or key on
-// Sec-Fetch-Site -- is #58, and it is deliberately not decided here.
+// The cost, knowingly: a deliberate caller such as curl has to set a header.
 const originRequired = true
+
+// The one exception to originRequired, and the rule for it: a request that
+// carries no Origin header is accepted when the browser vouches for where it
+// came from, through fetch metadata.
+//
+// Sec-Fetch-Site is that metadata. A browser sets it on every request it makes
+// and a page cannot: it is a forbidden header name, so fetch() and XHR cannot
+// set or override it, and there is no way to reach it from a form, an <img> or
+// a navigation either. The value describes the relationship between whoever
+// initiated the request and this origin, and it is computed over the whole
+// redirect chain and downgraded to the least trusted value in it, so a hostile
+// page cannot launder a cross-site request into a same-origin one by bouncing
+// it through a redirect.
+//
+// The two values that vouch, and why each is safe to accept:
+//
+//   - "same-origin": a document on this very origin made the request. The only
+//     document this origin can serve is the agent's own page, so this is that
+//     page's own GET. It is the request this exception exists for.
+//   - "none": the user initiated the request and no document did -- a URL
+//     typed in, a bookmark, a link handed over by the operating system. No page
+//     can cause one, which is what makes it safe; it is the startup URL being
+//     opened, the request that hands the token to the browser in the first
+//     place.
+//
+// "cross-site" and "same-site" do not vouch, and they are what a hostile
+// page's requests carry, whether those requests carry an Origin or not. A
+// client that sends neither an Origin nor a Sec-Fetch-Site -- curl, a script,
+// any non-browser caller, and a browser too old to implement fetch metadata --
+// is rejected, the same fail-closed direction as every other case here.
+//
+// The exception is deliberately narrow, and the narrowing is what a future
+// route inherits:
+//
+//   - It applies only when there is no Origin header at all. A present Origin
+//     goes to the allowlist and nothing rescues it, so a present-but-
+//     disallowed Origin is never treated like an absent one.
+//   - It applies only to GET and HEAD. A browser attaches Origin to every
+//     other method, same-origin included, so a state-changing route needs no
+//     relaxation and gets none: when a POST is added, its same-origin request
+//     carries an Origin and is checked against the allowlist like anything
+//     else. A POST with no Origin is not a shape a browser produces.
+//   - It does not apply to a request asking to be upgraded. A browser sends
+//     Origin on a WebSocket handshake, so the upgrade path in #5 neither needs
+//     this nor inherits it.
+//   - It is one half of a conjunction the guard does not short-circuit: the
+//     token is checked independently and still has to be the right one.
+//     Nothing that does not hold the token gains anything here.
+//
+// The trade-off, stated rather than implied: a caller that is not a browser
+// can send Sec-Fetch-Site: same-origin by hand. That gives away nothing that
+// was not already given away, because the same caller can send
+// Origin: http://127.0.0.1:<port> and be accepted today. The origin check has
+// never been able to constrain a non-browser client that holds the token and
+// does not pretend to. What this rule keeps is that absence of information is
+// never permission: a caller has to assert something, and the one assertion a
+// web page could make is the one it is not allowed to make.
+//
+// What it costs where it bites: a browser without fetch metadata (Chrome
+// before 76, Firefox before 90, Safari before 16.4) sends neither header, so
+// the page's GET is rejected there rather than served, as is a request whose
+// Sec-Fetch-Site an intermediary stripped.
+func fetchSiteVouches(value string) bool {
+	switch value {
+	case "same-origin", "none":
+		return true
+	default:
+		// Anything else, including an empty value, a list of values in one
+		// header, a different case and a value a later specification adds.
+		return false
+	}
+}
+
+// vouchedByFetchMetadata reports whether r is the one kind of request with no
+// Origin header that is accepted: see fetchSiteVouches for the rule and the
+// reasoning. The checks are in the order they are cheap in, and all of them
+// have to hold.
+func vouchedByFetchMetadata(r *http.Request) bool {
+	values := r.Header.Values(secFetchSiteHeader)
+	if len(values) != 1 {
+		// None, or more than one, which is not something a browser sends and
+		// not something to guess the meaning of.
+		return false
+	}
+	if !fetchSiteVouches(values[0]) {
+		return false
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	// An upgrade is a GET, so it would otherwise land in here; a browser sends
+	// Origin on a handshake, so there is nothing to relax.
+	return len(r.Header.Values(upgradeHeader)) == 0
+}
 
 // newOriginPolicy builds the allowlist for a server listening on port.
 //
@@ -92,12 +202,27 @@ func (p *originPolicy) origins() []string {
 	return append([]string(nil), p.order...)
 }
 
+// allowsRequest reports whether r may be answered as far as its origin goes.
+// It is the one place a request meets the origin rule, and it is written so
+// that a present Origin and an absent one cannot be confused: a request that
+// carries the header at all is decided by the allowlist below and by nothing
+// else, and only a request that carries none can be vouched for by the
+// browser's own fetch metadata.
+func (p *originPolicy) allowsRequest(r *http.Request) bool {
+	values := r.Header.Values(originHeader)
+	if len(values) == 0 && vouchedByFetchMetadata(r) {
+		return true
+	}
+	return p.allows(values)
+}
+
 // allows reports whether a request carrying these Origin header values is from
 // an allowed origin. The argument is the full header value list rather than a
 // single string so that the awkward cases are decided here and not by whoever
 // happened to call Header.Get:
 //
-//   - no Origin header: decided by originRequired, documented above
+//   - no Origin header: decided by originRequired, documented above, with the
+//     one exception allowsRequest has already applied before calling this
 //   - more than one Origin header: rejected, because which one the browser
 //     meant is not something to guess, and a request with two is not one a
 //     browser sends
