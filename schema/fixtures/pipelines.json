@@ -1,0 +1,665 @@
+{
+  "$comment": "The one set of pipeline fixtures. Both toolchains read this file: agent/internal/pipeline/fixtures_test.go and packages/schema/src/fixtures.test.ts. Never copy it per language. Each invalid case states the failures it expects as a pair of JSON Pointers: instanceLocation into the document, keywordLocation into schema/pipeline.schema.json. Both sides require every stated failure to be reported, which is how they are held to the same outcome. The stated failures are the ones the case is about; a validator may report further consequences of the same mistake.",
+  "valid": [
+    {
+      "name": "source-and-destination-only",
+      "why": "A source and a destination alone is a legal pipeline, so processingSteps may be absent entirely.",
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "zero-processing-steps",
+      "why": "The same pipeline written with an explicit empty list of steps.",
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "typescript",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "every-block-type",
+      "why": "One of each block in the plan's block table, in pipeline order, with and without a custom-code reference.",
+      "pipeline": {
+        "id": "orders-enriched",
+        "language": "go",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "consumerGroupId": "kpv-orders-enriched",
+          "autoOffsetReset": "earliest",
+          "messageFormat": "json"
+        },
+        "processingSteps": [
+          {
+            "id": "only-paid",
+            "type": "filter",
+            "configuration": { "expression": "status == 'paid'" }
+          },
+          {
+            "id": "to-billing-shape",
+            "type": "transform",
+            "configuration": {
+              "mappings": [
+                { "targetField": "amount", "expression": "order.total" },
+                { "targetField": "customer", "expression": "order.customer.id" }
+              ],
+              "dropUnmappedFields": true
+            }
+          },
+          {
+            "id": "require-amount",
+            "type": "validate",
+            "configuration": {
+              "rules": [
+                { "field": "amount", "required": true, "fieldType": "number" }
+              ],
+              "onInvalid": "deadLetter",
+              "deadLetterTopic": "billing.invalid.v1"
+            }
+          },
+          {
+            "id": "apply-discounts",
+            "type": "customCode",
+            "configuration": {
+              "entrypoint": "apply_discounts",
+              "timeoutMs": 2000
+            },
+            "customCode": {
+              "path": "src/discounts.go",
+              "symbol": "ApplyDiscounts"
+            }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1",
+          "acks": "all",
+          "preserveKey": true,
+          "messageFormat": "json"
+        },
+        "runtimeConfiguration": {
+          "networkMode": "host",
+          "envFile": "config/.env.local",
+          "environmentVariableNames": ["KAFKA_PASSWORD", "BILLING_API_TOKEN"],
+          "logLevel": "debug"
+        }
+      }
+    },
+    {
+      "name": "repeated-step-type-distinct-ids",
+      "why": "Two steps of the same type are fine; it is the identifiers that have to differ.",
+      "pipeline": {
+        "id": "orders-filtered-twice",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "only-paid",
+            "type": "filter",
+            "configuration": { "expression": "status == 'paid'" }
+          },
+          {
+            "id": "only-large",
+            "type": "filter",
+            "configuration": {
+              "expression": "order.total > 100",
+              "keepOnMatch": true
+            }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker", "logLevel": "warn" }
+      }
+    },
+    {
+      "name": "custom-code-step-without-reference",
+      "why": "The custom-code reference is optional on every step, including a custom-code step whose file is not written yet.",
+      "pipeline": {
+        "id": "orders-custom",
+        "language": "typescript",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "enrich",
+            "type": "customCode",
+            "configuration": { "entrypoint": "enrich" }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unknown-block-type",
+      "why": "A step type no block covers matches no branch of the union, so it fails instead of parsing as a partial object.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/0",
+          "keywordLocation": "/$defs/processingStep/oneOf"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "aggregate-hourly",
+            "type": "aggregate",
+            "configuration": { "window": "1h" }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "duplicate-step-identifiers",
+      "why": "Two steps sharing an identifier, which the x-kpv-uniqueBy annotation on processingSteps rejects.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/1/id",
+          "keywordLocation": "/properties/processingSteps/x-kpv-uniqueBy"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "only-paid",
+            "type": "filter",
+            "configuration": { "expression": "status == 'paid'" }
+          },
+          {
+            "id": "only-paid",
+            "type": "transform",
+            "configuration": {
+              "mappings": [
+                { "targetField": "amount", "expression": "order.total" }
+              ]
+            }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "unsupported-language",
+      "why": "language accepts only python, typescript and go.",
+      "errors": [
+        {
+          "instanceLocation": "/language",
+          "keywordLocation": "/$defs/language/enum"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "java",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "missing-destination",
+      "why": "A pipeline without a destination is not a pipeline.",
+      "errors": [{ "instanceLocation": "", "keywordLocation": "/required" }],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "missing-runtime-configuration",
+      "why": "runtimeConfiguration is part of the model, not an optional extra.",
+      "errors": [{ "instanceLocation": "", "keywordLocation": "/required" }],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        }
+      }
+    },
+    {
+      "name": "unknown-top-level-property",
+      "why": "The model is closed, so a property it does not define is a mistake rather than something to carry along.",
+      "errors": [
+        { "instanceLocation": "", "keywordLocation": "/additionalProperties" }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "schedule": "hourly",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "step-without-identifier",
+      "why": "Every processing step carries a stable identifier.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/0",
+          "keywordLocation": "/$defs/processingStep/oneOf"
+        },
+        {
+          "instanceLocation": "/processingSteps/0",
+          "keywordLocation": "/$defs/filterStep/required"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "type": "filter",
+            "configuration": { "expression": "status == 'paid'" }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "step-identifier-not-an-identifier",
+      "why": "An identifier starts with a letter, so a step cannot be called 1st-filter.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/0/id",
+          "keywordLocation": "/$defs/identifier/pattern"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "1st-filter",
+            "type": "filter",
+            "configuration": { "expression": "status == 'paid'" }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "unknown-property-in-step-configuration",
+      "why": "A filter configured with a transform's field is a mistake, not a filter with extra information.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/0/configuration",
+          "keywordLocation": "/$defs/filterStep/properties/configuration/additionalProperties"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "only-paid",
+            "type": "filter",
+            "configuration": {
+              "expression": "status == 'paid'",
+              "mappings": [
+                { "targetField": "amount", "expression": "order.total" }
+              ]
+            }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "transform-step-with-no-mappings",
+      "why": "A transform that maps nothing is not a transform.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/0/configuration/mappings",
+          "keywordLocation": "/$defs/transformStep/properties/configuration/properties/mappings/minItems"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "to-billing-shape",
+            "type": "transform",
+            "configuration": { "mappings": [] }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "validate-step-with-unknown-on-invalid",
+      "why": "A validate block handles invalid messages in one of the three configured ways.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/0/configuration/onInvalid",
+          "keywordLocation": "/$defs/validateStep/properties/configuration/properties/onInvalid/enum"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "require-amount",
+            "type": "validate",
+            "configuration": {
+              "rules": [{ "field": "amount" }],
+              "onInvalid": "retry"
+            }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "custom-code-reference-outside-the-project",
+      "why": "A custom-code path is project-relative, so it cannot start at the filesystem root.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps/0/customCode/path",
+          "keywordLocation": "/$defs/customCodeReference/properties/path/pattern"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": [
+          {
+            "id": "enrich",
+            "type": "customCode",
+            "configuration": { "entrypoint": "enrich" },
+            "customCode": { "path": "/etc/kpv/enrich.py" }
+          }
+        ],
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "source-with-the-destination-discriminator",
+      "why": "The source block is a Kafka source; its discriminator pins that down.",
+      "errors": [
+        {
+          "instanceLocation": "/source/type",
+          "keywordLocation": "/$defs/kafkaSourceBlock/properties/type/enum"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaDestination",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "empty-source-topic",
+      "why": "A topic name has to name a topic.",
+      "errors": [
+        {
+          "instanceLocation": "/source/topic",
+          "keywordLocation": "/$defs/kafkaTopic/minLength"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": { "id": "orders", "type": "kafkaSource", "topic": "" },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "processing-steps-not-a-list",
+      "why": "The steps are an ordered list, not a single value.",
+      "errors": [
+        {
+          "instanceLocation": "/processingSteps",
+          "keywordLocation": "/properties/processingSteps/type"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "processingSteps": {
+          "id": "only-paid",
+          "type": "filter",
+          "configuration": { "expression": "status == 'paid'" }
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "unknown-network-mode",
+      "why": "Runtime networking is one of the two modes the agent can set up.",
+      "errors": [
+        {
+          "instanceLocation": "/runtimeConfiguration/networkMode",
+          "keywordLocation": "/$defs/runtimeConfiguration/properties/networkMode/enum"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "bridge" }
+      }
+    },
+    {
+      "name": "secret-value-in-runtime-configuration",
+      "why": "Only the names of environment variables belong in the file; a lower-case assignment is not a name.",
+      "errors": [
+        {
+          "instanceLocation": "/runtimeConfiguration/environmentVariableNames/0",
+          "keywordLocation": "/$defs/runtimeConfiguration/properties/environmentVariableNames/items/pattern"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": {
+          "networkMode": "docker",
+          "environmentVariableNames": ["kafka_password=hunter2"]
+        }
+      }
+    }
+  ]
+}
