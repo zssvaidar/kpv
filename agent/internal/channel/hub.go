@@ -64,7 +64,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) error {
 		// caller turns a handshake that did not become a 101 into the
 		// boundary's one uniform rejection, whether the library wrote
 		// something or nothing was written at all.
-		return &ChannelError{Op: "serve", Kind: KindClosed, Message: "the channel is closed, so the handshake was refused"}
+		return &Error{Op: "serve", Kind: KindClosed, Message: "the channel is closed, so the handshake was refused"}
 	}
 
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -77,7 +77,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) error {
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
-		return &ChannelError{Op: "serve", Kind: KindUpgrade, Message: "the WebSocket handshake was not completed", Err: err}
+		return &Error{Op: "serve", Kind: KindUpgrade, Message: "the WebSocket handshake was not completed", Err: err}
 	}
 	ws.SetReadLimit(h.options.ReadLimit)
 
@@ -86,7 +86,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) error {
 		// The hub closed between the check above and here. Nothing has been
 		// sent on this connection and nothing will be.
 		connection.hangUp("the channel closed while the connection was being set up")
-		return &ChannelError{Op: "serve", Kind: KindClosed, Message: "the channel closed while the handshake was in flight"}
+		return &Error{Op: "serve", Kind: KindClosed, Message: "the channel closed while the handshake was in flight"}
 	}
 	h.logger.Debug("a channel client connected", "connections", h.Connections())
 	connection.run()

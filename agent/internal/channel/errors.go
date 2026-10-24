@@ -20,12 +20,14 @@ const (
 	KindClosed ErrorKind = "closed"
 )
 
-// ChannelError is the one structured failure this package reports.
+// Error is the one structured failure this package reports. It is named for
+// the package it is in, as url.Error is: channel.Error, not
+// channel.ChannelError.
 //
 // It deliberately never carries anything a client presented, because these
 // errors are the things that get logged: a reason in the agent's own words,
 // the kind, and the cause from the library.
-type ChannelError struct {
+type Error struct {
 	// Op is what was being done: "serve".
 	Op string
 	// Kind says what went wrong.
@@ -36,7 +38,7 @@ type ChannelError struct {
 	Err error
 }
 
-func (e *ChannelError) Error() string {
+func (e *Error) Error() string {
 	var out strings.Builder
 	if e.Op != "" {
 		out.WriteString(e.Op)
@@ -51,14 +53,14 @@ func (e *ChannelError) Error() string {
 }
 
 // Unwrap exposes the underlying cause, so errors.Is and errors.As reach it.
-func (e *ChannelError) Unwrap() error {
+func (e *Error) Unwrap() error {
 	return e.Err
 }
 
-// KindOf reports the kind of err, or "" when err is not a *ChannelError. It is
+// KindOf reports the kind of err, or "" when err is not a *Error. It is
 // what a caller uses instead of matching on a message.
 func KindOf(err error) ErrorKind {
-	var fault *ChannelError
+	var fault *Error
 	if errors.As(err, &fault) {
 		return fault.Kind
 	}
