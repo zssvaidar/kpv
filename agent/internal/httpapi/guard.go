@@ -55,9 +55,11 @@ func (g *guard) wrap(next http.Handler) http.Handler {
 // The one rejection every failed check produces.
 //
 // It is 404 with a fixed body: no detail, no header that varies, and the same
-// answer a path that does not exist gets. A client cannot tell a missing token
-// from a wrong token from a disallowed origin from a route that was never
-// there, so an unauthorized caller cannot even enumerate the API.
+// answer an unauthorized request to a path that does not exist gets. Nothing
+// without the token can tell a missing token from a wrong token from a
+// disallowed origin from a route that was never there, so an unauthorized
+// caller cannot even enumerate the API. A caller holding the token does see
+// net/http's own 404 and 405, which is routing, not a check.
 //
 // 401 with a uniform body would satisfy the same criterion and would be the
 // more conventional status; it is not used because it would confirm that

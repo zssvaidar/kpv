@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"fmt"
+	"io"
 	"log/slog"
 )
 
@@ -80,7 +82,17 @@ func (t Token) matches(presented string) bool {
 	return subtle.ConstantTimeCompare(t.digest[:], presentedDigest[:]) == 1
 }
 
-// String hides the token. It is what makes fmt verbs safe on a Token.
+// Format renders the token redacted for every fmt verb. String alone is not
+// enough: fmt only consults a Stringer for the string verbs, so %d prints the
+// struct's fields and %#v prints them with the field names. Implementing
+// fmt.Formatter takes that path away, which is the difference between a type
+// that usually hides its secret and one that always does.
+func (t Token) Format(f fmt.State, _ rune) {
+	_, _ = io.WriteString(f, redacted)
+}
+
+// String hides the token from anything that asks for a string rather than
+// formatting it.
 func (t Token) String() string {
 	return redacted
 }

@@ -120,12 +120,12 @@ func TestATokenRefusesToRenderItself(t *testing.T) {
 	token := newTokenOrFail(t)
 	secret := token.Secret()
 
-	rendered := map[string]string{
-		"%v":     fmt.Sprintf("%v", token),
-		"%s":     fmt.Sprintf("%s", token),
-		"%q":     fmt.Sprintf("%q", token),
-		"%+v":    fmt.Sprintf("%+v", token),
-		"String": token.String(),
+	rendered := map[string]string{"String": token.String()}
+	// Every verb, including the numeric and Go-syntax ones that would
+	// otherwise print the struct's fields instead of asking it to render
+	// itself.
+	for _, verb := range []string{"%v", "%s", "%q", "%+v", "%#v", "%d", "%x", "%X"} {
+		rendered[verb] = fmt.Sprintf(verb, token)
 	}
 	for verb, out := range rendered {
 		if strings.Contains(out, secret) {
