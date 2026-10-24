@@ -64,6 +64,15 @@ func TestThePageOwnFetchIsAnsweredWithNoOrigin(t *testing.T) {
 		}
 	}
 
+	// The token is accepted in both the places #4 accepts it, with no Origin
+	// as with one. The query parameter matters here specifically: it is how
+	// the startup URL hands the token to the browser in the first place, so
+	// it is what a page has before it has anything else.
+	inQuery := request{queryToken: server.Token().Secret(), headers: http.Header{secFetchSiteHeader: {"same-origin"}}}
+	if answer := server.do(t, inQuery); answer.Status != http.StatusOK {
+		t.Errorf("the page's own fetch with the token in the query parameter was answered %d, want 200: %s", answer.Status, answer)
+	}
+
 	// The same shape with the request the user's own navigation makes: no
 	// document initiated it, so no page could have caused it.
 	navigation := server.pageFetch("/api/health")
