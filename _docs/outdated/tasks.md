@@ -13,11 +13,29 @@ of scope during grooming.
 
 Derived from `_docs/outdated/plan.md`.
 
-**Stack assumption:** these tasks assume the all-TypeScript stack — a pnpm
-monorepo with `@kpv/schema` (shared Zod pipeline model), `@kpv/agent` (Node +
-Fastify + ws local agent), `@kpv/web` (React + Vite + `@xyflow/react`), and
-per-language parser/codegen sidecars. If the stack changes to a Go agent, the
-task boundaries hold but the package names and a few library choices change.
+**Stack assumption:** the agent is Go, as `_docs/outdated/plan.md` section 4.2
+requires. The repository is a polyglot monorepo:
+
+- `schema/` — the authoritative, language-neutral `pipeline.schema.json`, with
+  Go structs and a TypeScript Zod package (`@kpv/schema`) generated from it, so
+  the agent and the browser cannot drift apart. The JSON Schema is the single
+  source of truth; both outputs are generated and neither is hand-edited.
+- `agent/` — the Go local agent (`net/http` on loopback with token auth,
+  WebSocket, path guard, Docker Compose lifecycle, codegen, parser harness),
+  built as one module and shipped as a single static binary with the web assets
+  embedded. A pure-Go Kafka client is preferred so `CGO_ENABLED=0` builds and
+  cross-compilation keep working.
+- `@kpv/web` — React + Vite + `@xyflow/react`, Monaco for full-file editing and
+  CodeMirror 6 embedded in custom-code blocks.
+- parser sidecars for Python (`ast`) and TypeScript (`ts-morph`), invoked as
+  subprocesses, so import of those languages needs `python3` and `node` on the
+  host. Go source is parsed in-process by the agent with `go/ast` behind the
+  same contract, with no sidecar.
+
+The task boundaries below still hold. The package names, library choices, and
+schema strategy in the descriptions below do not: where a description says
+`@kpv/agent`, a Fastify server, or a Zod-first schema, the groomed issue is
+correct and this archived file is not.
 
 **How to read this:** tasks are listed in a sensible build order, but each one
 is written to stand alone. Descriptions name the packages and artifacts a task
