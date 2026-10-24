@@ -54,6 +54,7 @@ func rejectionCases(server *testServer) map[string]request {
 		"two Origin headers":                     {token: right, origins: []string{own, own}},
 		"an origin that is only a prefix":        {token: right, origins: []string{own + ".evil.example"}},
 		"neither the token nor the origin":       {},
+		"an unauthorized OPTIONS *":              {method: http.MethodOptions, asterisk: true},
 		"a path that does not exist":             {path: "/api/does-not-exist"},
 		"a method no route serves, unauthorized": {method: http.MethodDelete},
 	}

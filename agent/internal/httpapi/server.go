@@ -120,12 +120,24 @@ func New(options Options) (*Server, error) {
 		origins:  origins,
 		logger:   logger,
 		http: &http.Server{
-			Handler:           newHandler(g, apiRoutes()),
-			ReadHeaderTimeout: readHeaderTimeout,
-			ReadTimeout:       readTimeout,
-			WriteTimeout:      writeTimeout,
-			IdleTimeout:       idleTimeout,
-			MaxHeaderBytes:    maxHeaderBytes,
+			Handler: newHandler(g, apiRoutes()),
+			// net/http answers OPTIONS * itself, from its own
+			// globalOptionsHandler, before it ever calls Handler: an
+			// unauthorized OPTIONS * got a 200 with an empty body while every
+			// other unauthorized request got the uniform 404, which is
+			// exactly the signal the uniform rejection exists to withhold.
+			// Disabling it sends OPTIONS * through the guard like anything
+			// else. This is the only request shape net/http serves ahead of
+			// Handler that it also lets us take back; the two it does not,
+			// 400 for a request with no Host and 431 for headers over the
+			// cap, are answered before a handler could exist and distinguish
+			// none of the checks from each other.
+			DisableGeneralOptionsHandler: true,
+			ReadHeaderTimeout:            readHeaderTimeout,
+			ReadTimeout:                  readTimeout,
+			WriteTimeout:                 writeTimeout,
+			IdleTimeout:                  idleTimeout,
+			MaxHeaderBytes:               maxHeaderBytes,
 			// The server's own log goes through slog as well, so a connection
 			// error cannot reach stderr by a path nothing here controls.
 			ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelDebug),

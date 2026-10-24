@@ -114,6 +114,10 @@ type request struct {
 	queryToken string
 	// origins are the Origin header values; nil sends no Origin header.
 	origins []string
+	// asterisk sends the request against the asterisk-form target, "OPTIONS *
+	// HTTP/1.1", which net/http used to answer out of its own built-in
+	// handler before Server.Handler was ever consulted.
+	asterisk bool
 }
 
 func (ts *testServer) do(t *testing.T, want request) response {
@@ -145,6 +149,14 @@ func (ts *testServer) do(t *testing.T, want request) response {
 	}
 	for _, origin := range want.origins {
 		r.Header.Add("Origin", origin)
+	}
+
+	if want.asterisk {
+		// url.URL turns an opaque "*" into the asterisk-form request target,
+		// which is the only way to say "the server itself" rather than a path.
+		r.URL.Opaque = "*"
+		r.URL.Path = ""
+		r.URL.RawQuery = ""
 	}
 
 	answer, err := ts.client.Do(r)
