@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/zssvaidar/kpv/agent/internal/channel"
 )
 
 // tokenParameter is the query parameter the session token may arrive in, and
@@ -25,6 +27,17 @@ type guard struct {
 	token   Token
 	origins *originPolicy
 	logger  *slog.Logger
+	// channel is the push channel the WebSocket route serves (#5). It rides
+	// on the guard because newHandler is handed the guard and the route
+	// table, and nothing else: the table's rows are plain handlers with no
+	// state behind them, and the two tests that make the checks impossible to
+	// forget pin both of those shapes -- newHandler(g, apiRoutes()) is the
+	// only expression allowed to be the served handler. So the one object the
+	// handler needs is carried by the one object that reaches it.
+	//
+	// A nil channel means a server with no channel, which answers the route
+	// with the same rejection as anything else. Only a test builds one.
+	channel *channel.Hub
 }
 
 // wrap returns next behind the checks. Every request, including one that

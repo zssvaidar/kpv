@@ -13,6 +13,9 @@
 //     is written in exactly one place: the startup line the operator reads
 //   - the served handler is built once, from a route table, already wrapped in
 //     the guard, so a new route cannot be registered outside the checks
+//   - the push channel (#5) is a route on that same mux, so a handshake is
+//     checked before it is accepted and a refused one answers the same 404 as
+//     everything else; internal/channel is what runs a connection once it is
 package httpapi
 
 import (
@@ -24,6 +27,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/zssvaidar/kpv/agent/internal/channel"
 )
 
 // loopbackHost is the only address the agent binds. It is IPv4 loopback
@@ -61,6 +66,13 @@ type Options struct {
 	// Logger receives server events. It never receives the token, nor
 	// anything a client presented. A nil Logger discards everything.
 	Logger *slog.Logger
+	// Channel configures the push channel's timings and bounds: how often a
+	// peer is pinged, how long a write may take, how far behind a client may
+	// fall. The zero value is the channel's documented defaults, which is
+	// what the agent runs with; a test sets them small so that it does not
+	// have to sit out a real interval. Its Logger is ignored: the channel
+	// logs to the server's logger, so there is one log.
+	Channel channel.Options
 }
 
 // Server is the agent's local HTTP API, bound and ready to serve.
@@ -69,6 +81,7 @@ type Server struct {
 	listener net.Listener
 	address  *net.TCPAddr
 	origins  *originPolicy
+	channel  *channel.Hub
 	http     *http.Server
 	logger   *slog.Logger
 }
@@ -112,12 +125,21 @@ func New(options Options) (*Server, error) {
 		return nil, err
 	}
 
-	g := &guard{token: token, origins: origins, logger: logger}
+	// The channel's own origin check is defence in depth behind the guard's,
+	// so it is given the same allowlist; the guard has already refused
+	// anything this would, and more.
+	channelOptions := options.Channel
+	channelOptions.Logger = logger
+	channelOptions.AllowedOrigins = origins.origins()
+	hub := channel.New(channelOptions)
+
+	g := &guard{token: token, origins: origins, logger: logger, channel: hub}
 	server := &Server{
 		token:    token,
 		listener: listener,
 		address:  address,
 		origins:  origins,
+		channel:  hub,
 		logger:   logger,
 		http: &http.Server{
 			Handler: newHandler(g, apiRoutes()),
@@ -179,6 +201,14 @@ func (s *Server) Token() Token {
 	return s.token
 }
 
+// Channel is the push channel behind the WebSocket route: what the agent
+// publishes logs and status on, once #34 and #35 produce them. It is the one
+// way to reach a connected client, and it is reachable only from inside the
+// agent: a client cannot ask it for anything but a subscription.
+func (s *Server) Channel() *channel.Hub {
+	return s.channel
+}
+
 // AllowedOrigins is the origin allowlist, the server's own origin included.
 func (s *Server) AllowedOrigins() []string {
 	return s.origins.origins()
@@ -200,6 +230,11 @@ func (s *Server) Serve() error {
 // Shutdown stops the server gracefully: no new connections, and in-flight
 // requests get until ctx is done to finish.
 func (s *Server) Shutdown(ctx context.Context) error {
+	// The channel first, and not as a courtesy: a hijacked connection is one
+	// net/http has forgotten about, so http.Shutdown neither closes a
+	// WebSocket nor waits for one. Without this a shut-down agent would keep
+	// every channel client, and its goroutine, until the process exited.
+	s.channel.Close()
 	if err := s.http.Shutdown(ctx); err != nil {
 		return &ServerError{Op: "shutdown", Kind: KindShutdown, Message: "the agent API did not shut down cleanly", Err: err}
 	}
@@ -210,6 +245,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // Close stops the server at once, dropping anything in flight. It is what a
 // test defers and what a failed startup path uses.
 func (s *Server) Close() error {
+	// As in Shutdown: http.Close does not know about a hijacked connection,
+	// so the channel is closed here or not at all.
+	s.channel.Close()
 	if err := s.http.Close(); err != nil {
 		return &ServerError{Op: "shutdown", Kind: KindShutdown, Message: "the agent API did not close cleanly", Err: err}
 	}

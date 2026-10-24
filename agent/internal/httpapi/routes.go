@@ -34,13 +34,20 @@ func apiRoutes() []route {
 }
 
 // newHandler builds the handler the server serves: a fresh ServeMux carrying
-// routes, wrapped in the guard. Nothing else in this package creates a mux or
-// registers a pattern, so every route and every unmatched path is checked.
+// routes and the channel endpoint, wrapped in the guard. Nothing else in this
+// package creates a mux or registers a pattern, so every route and every
+// unmatched path is checked.
 func newHandler(g *guard, routes []route) http.Handler {
 	mux := http.NewServeMux()
 	for _, r := range routes {
 		mux.Handle(r.pattern, r.handler)
 	}
+	// The channel is a route on this mux like any other, which is what puts
+	// it inside the wrap below: the token and the origin are checked before
+	// the handshake is looked at, never after it is accepted. See
+	// channelPattern in channel.go for why it is registered here instead of
+	// being a row in the table.
+	mux.Handle(channelPattern, g.channelRoute())
 	return g.wrap(mux)
 }
 
