@@ -110,7 +110,13 @@ prints the URL to open and serves.
   query parameter, which is how the startup URL carries it to the browser
 - the `Origin` header is checked against an exact allowlist: the agent's own
   origin plus anything in `Options.AllowedOrigins`. A request with no `Origin`
-  is rejected; `originRequired` in `origin.go` is the rule and says why
+  is rejected, fail closed; `originRequired` in `origin.go` is the rule and
+  says why. Note what a browser really does: it sends `Origin` on every
+  cross-origin request and on a same-origin request that is not `GET`/`HEAD`,
+  so a same-origin `GET` carries none. That matters once the agent serves its
+  own page, and whether an absent `Origin` should then be accepted on a valid
+  token, or `Sec-Fetch-Site` keyed on instead, is #58 and deliberately not
+  decided in #4
 - every failed check answers the same 404 with the same body and headers, the
   same answer an unauthorized request to a path that does not exist gets, so
   nothing can tell the three failures apart. Both checks run before either is

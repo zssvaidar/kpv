@@ -19,24 +19,37 @@ type originPolicy struct {
 
 // The rule for a request that carries no Origin header at all.
 //
-// It is rejected. Absence is treated as a disallowed origin, not as
-// permission, and this is the deliberate choice the two defensible ones:
+// It is rejected: absence is treated as a disallowed origin, not as
+// permission. The premise matters as much as the rule, so it is stated as the
+// specification has it rather than as it is convenient to remember.
 //
-//   - The only client this API is built for is the browser session the startup
-//     URL opens, and a browser attaches Origin to every fetch, XHR and
-//     WebSocket handshake it sends here. So a request with no Origin is, by
-//     construction, not that client.
-//   - The alternative rule, "no Origin means a non-browser client, which the
-//     same-origin policy cannot be tricked into making a request, so allow
-//     it", is defensible and is what many local servers do. It is rejected
-//     here because it turns one omitted header into a way around the check:
-//     anything that can reach the loopback socket and knows the token would
-//     rather send no Origin than a wrong one, and a rule that rewards that is
-//     not a check. A deliberate caller such as curl can set the header.
+// What a browser actually sends: it attaches Origin to every cross-origin
+// request, and to a same-origin request whose method is not GET or HEAD. It
+// does not attach one to a same-origin GET. So an absent Origin means one of
+// three things: a client that is not a browser, a same-origin GET from a page
+// the agent itself serves, or something that stripped the header. It does not
+// mean a cross-origin request: those always carry one.
 //
-// The cost is paid knowingly: a plain `curl http://127.0.0.1:port/...` without
-// an Origin header is rejected even with the right token, and anything
-// scripted against this API has to send one.
+// Why reject anyway:
+//
+//   - The attack the allowlist exists to stop is a page on some other origin,
+//     in the user's browser, making requests to this loopback socket. Such a
+//     request carries an Origin by construction and a disallowed one, so the
+//     allowlist rejects it whatever the rule for absence is. Rejecting absence
+//     buys nothing there; it is about everything else.
+//   - Treating absence as permission turns one omitted header into a way round
+//     the check for anything that can reach the socket: a client holding a
+//     leaked token would rather send no Origin than a wrong one, and a rule
+//     that rewards that is not a check. So: fail closed.
+//   - The one legitimate no-Origin browser request, a same-origin GET, does
+//     not exist yet. The agent serves no page of its own: #4 adds no route
+//     that could, and nothing here reads the filesystem.
+//
+// The cost, knowingly: a deliberate caller such as curl has to set the header,
+// and once the agent does serve its own page, that page's same-origin GET
+// would be rejected with nothing in front of it to supply an Origin. Which way
+// that should go -- accept an absent Origin when the token is valid, or key on
+// Sec-Fetch-Site -- is #58, and it is deliberately not decided here.
 const originRequired = true
 
 // newOriginPolicy builds the allowlist for a server listening on port.
