@@ -6,8 +6,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Generated schema output (produced by #2, never committed)
-packages/schema/src/generated/
+# Generated schema output is committed on purpose: `pnpm run generate:check`
+# regenerates it and fails on any diff, which is how CI catches both a stale
+# schema and a hand-edited generated file. See scripts/check-generated.mjs.
 
 # Go build output
 /agent/bin/
