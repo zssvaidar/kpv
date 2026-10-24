@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// Fails when anything generated from schema/pipeline.schema.json is stale.
+// Fails when anything generated from a schema in schema/ is stale.
 //
 // The generated output is committed, so this check is simply: regenerate, then
 // ask git whether anything moved. That is what makes it catch both a schema
 // change nobody regenerated for and a hand-edit of a generated file, since
-// regenerating overwrites the edit and the diff shows up here.
+// regenerating overwrites the edit and the diff shows up here. The schemas
+// themselves are listed too, because the Go module holds a committed copy of
+// each one and a schema edit that nobody regenerated for shows up as a diff
+// between the two.
 
 import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
@@ -17,9 +20,12 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 // any of them means the committed tree and the schema disagree.
 const generatedPaths = [
   'schema/pipeline.schema.json',
+  'schema/channel.schema.json',
   'packages/schema/src/generated',
   'agent/internal/pipeline/models_gen.go',
   'agent/internal/pipeline/pipeline.schema.json',
+  'agent/internal/channel/models_gen.go',
+  'agent/internal/channel/channel.schema.json',
 ];
 
 const git = (...args) =>
@@ -47,7 +53,7 @@ process.stderr.write(
   [
     'Generated output is stale or was hand-edited.',
     '',
-    'These paths are generated from schema/pipeline.schema.json and differ from',
+    'These paths are generated from the schemas in schema/ and differ from',
     'what is committed:',
     '',
     dirty,
