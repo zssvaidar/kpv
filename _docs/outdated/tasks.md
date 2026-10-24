@@ -1,6 +1,16 @@
-# Kafka Pipeline Visualizer — Task Backlog
+# Kafka Pipeline Visualizer — Task Backlog (archived)
 
-Derived from `_docs/plan.md`.
+Superseded. The backlog lives as GitHub issues in
+https://github.com/zssvaidar/kpv/issues — issues #1-#47 were generated from
+this file, one per task, and are the source of truth. This copy is kept for
+reference; editing it changes nothing.
+
+Each task is groomed into the shape described in `_docs/task-template.md` on
+the issue itself, before anyone implements it. The two-field Goal/Description
+form below predates that template, so the issue bodies still carry the old
+shape until a PM grooms them.
+
+Derived from `_docs/outdated/plan.md`.
 
 **Stack assumption:** these tasks assume the all-TypeScript stack — a pnpm
 monorepo with `@kpv/schema` (shared Zod pipeline model), `@kpv/agent` (Node +

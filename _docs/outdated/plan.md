@@ -1,6 +1,8 @@
 # Kafka Pipeline Visualizer & Editor
 ## Technical Specification — Draft v0.1
 
+**Archived:** superseded by the GitHub issue backlog at
+https://github.com/zssvaidar/kpv/issues, kept for reference.  
 **Status:** Initial specification  
 **Scope:** MVP  
 **Target users:** Kafka developers  
