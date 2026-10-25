@@ -27,8 +27,23 @@
 // while the guarantee lives in the open itself. See Path in path.go.
 //
 // Nothing here runs a command. No path reaches a shell from this package or
-// from anywhere else in the agent, and shell_test.go holds the whole module to
-// that.
+// from anywhere else in the agent, and boundary_test.go holds the whole module
+// to that.
+//
+// What this does not stop, written down because a guard whose edges are
+// guessed at is worse than one whose edges are known:
+//
+//   - A hard link inside a root to a file outside it. The file is inside the
+//     root, by one of its names, and no amount of path checking can see the
+//     difference; creating one needs write access to the root already.
+//   - A bind mount, or a /proc magic link, placed inside a root. os.Root says
+//     so itself: it confines paths, not mounts. Both need privileges this
+//     agent does not have and does not use.
+//   - A differently cased spelling of an authorized root on a case-insensitive
+//     filesystem. That is refused, which is the fail-closed direction and
+//     costs usability rather than safety; within in resolve.go says why.
+//   - Anything about what happens to a file after it is handed over. This
+//     package decides which files may be reached, not what is done with them.
 package projectfs
 
 import (
