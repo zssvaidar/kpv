@@ -4,8 +4,13 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -53,5 +58,56 @@ func TestStartupPrintsTheURLCarryingTheToken(t *testing.T) {
 	}
 	if logged.Len() == 0 {
 		t.Error("startup logged nothing at all, so the check above proves little")
+	}
+}
+
+// The agent as started browses the user's home directory without it being
+// authorized, and a home it cannot open does not stop it starting.
+func TestTheStartedAgentBrowsesTheHomeDirectory(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temporary directory: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(home, "code"), 0o755); err != nil {
+		t.Fatalf("make a directory in home: %v", err)
+	}
+
+	for name, test := range map[string]struct {
+		home   string
+		status int
+		want   string
+	}{
+		"a home it can open": {home, http.StatusOK, `"path":` + strconv.Quote(home)},
+		"no home at all":     {filepath.Join(home, "missing"), http.StatusBadRequest, `"error":"invalid"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HOME", test.home)
+			var printed bytes.Buffer
+			server, err := start(&printed, slog.New(slog.DiscardHandler))
+			if err != nil {
+				t.Fatalf("start the agent: %v", err)
+			}
+			defer func() { _ = server.Close() }()
+			go func() { _ = server.Serve() }()
+
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL()+"/api/directories", nil)
+			if err != nil {
+				t.Fatalf("build the request: %v", err)
+			}
+			request.Header.Set("Authorization", "Bearer "+server.Token().Secret())
+			request.Header.Set("Origin", server.URL())
+			answer, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatalf("ask for the home directory: %v", err)
+			}
+			defer func() { _ = answer.Body.Close() }()
+			body, err := io.ReadAll(answer.Body)
+			if err != nil {
+				t.Fatalf("read the answer: %v", err)
+			}
+			if answer.StatusCode != test.status || !strings.Contains(string(body), test.want) {
+				t.Fatalf("got %d %s, want %d with %s", answer.StatusCode, body, test.status, test.want)
+			}
+		})
 	}
 }
