@@ -12,13 +12,19 @@ Commands
 Root scripts are the single entry point; a developer and CI run the same ones.
 
 - `pnpm install` - install the TypeScript workspace (`@kpv/web`, `@kpv/schema`)
-- `pnpm test` - Vitest for the workspace, then `go test ./...` for the agent
-- `pnpm typecheck` - `tsc` at the root, then `go vet ./...`
+- `pnpm test` - Vitest for the workspace, then `go test ./...` for the agent.
+  `@kpv/web`'s `dev/` tests build and start a real agent, so they need Go too
+- `pnpm typecheck` - `tsc` at the root, then each package's own `typecheck`
+  (`@kpv/web` has two projects: the browser `src/`, and Node's `dev/` plus
+  `vite.config.ts`), then `go vet ./...`
 - `pnpm lint` - ESLint, Prettier, then golangci-lint
-- `pnpm build` - generate from the schema, `tsc` per package, `go build ./...`
+- `pnpm build` - generate from the schema, `tsc` per package plus `vite build`
+  for `@kpv/web`, `go build ./...`
 - `pnpm generate` - regenerate everything derived from the pipeline schema
 - `pnpm generate:check` - regenerate and fail if the committed output moved
 - `pnpm format` - Prettier writes the TypeScript workspace
+- `pnpm dev` - build and start a fresh agent, start the Vite dev server in
+  front of it, and print the one URL to open (see "The web shell")
 
 The Go module lives in `agent/` (module `github.com/zssvaidar/kpv/agent`), so
 plain `go` commands run from there: `cd agent && go test ./...`.
@@ -223,6 +229,63 @@ with a timer beside it.
 - a message that will not serialize is logged and dropped, once, in `Publish`,
   where it reaches no connection at all. A client that subscribed to nothing
   receives nothing, so there is no broadcast to forget about
+
+The web shell
+
+`packages/web` is `@kpv/web`, a Vite + React app in strict TypeScript (#8):
+the layout shell, the one typed client for the agent, and the connection state.
+
+- `src/api/client.ts` is the only place the page reaches the agent. The token
+  is handed to `createAgentClient` once and put on every request by the one
+  function that sends anything, as `Authorization: Bearer`; no method takes
+  headers or a URL. ESLint refuses `fetch`, `WebSocket`, `XMLHttpRequest` and
+  `EventSource` anywhere else in `src/`. Answers are parsed with the generated
+  Zod schemas from `@kpv/schema`, never hand-written types
+- a rejection and an absent agent are told apart by whether a response
+  arrived at all: the agent answers every failed check with one uniform `404`,
+  so a `404` that is not the endpoint's own typed error is a rejection, shown
+  as an authentication problem, and a request that gets no answer is an agent
+  that is not there. Known consequence: the rejection is also what a path the
+  agent never served gets, so a mistyped or too-new route reads as an
+  authentication problem too
+- `src/connection/monitor.ts` holds the connection state the status bar
+  always shows. The push channel's WebSocket is the liveness signal; when it
+  drops, one request through the client says why, and the page reconnects
+  with backoff (250ms doubling, at most 10s) unless it was a rejection, which
+  waiting cannot fix
+- the session token is held in memory only. `src/session/token.ts` takes it
+  out of the address bar and the session history with `history.replaceState`
+  before anything renders, and ESLint refuses every storage API in `src/`. So
+  a reload has no token and shows the authentication state; the way back is
+  re-opening the agent's startup URL, which in development is the one
+  `pnpm dev` printed. Since #58 a link carrying the token is a link that works,
+  which is why the stripping matters
+- the page sends no `Referer`: a `<meta>` in `index.html` and, in
+  development, a `Referrer-Policy` header, because Vite's own client script
+  loads ahead of the `<meta>`
+
+Development (`pnpm dev`, `dev/`)
+
+- the agent binds an ephemeral port per run and prints a URL carrying the
+  token that points at the agent's own origin, not at the dev server. So
+  `pnpm dev` builds the agent from this checkout, starts it, reads its
+  startup lines for the port and the token, starts Vite (port 5173, or the
+  next free one) and prints `open http://127.0.0.1:<port>/?token=...`. Open
+  that. Nothing is configured or committed, and every run is a new agent, a
+  new port and a new token. Stopping it stops both; the dev server outlives an
+  agent that dies, so the page shows what that looks like
+- `/api` is proxied by `dev/agent-proxy.ts`, a small proxy of its own rather
+  than Vite's `server.proxy`, which answers `502` for a dead agent (an answer,
+  which is the wrong signal) and logs failed URLs (the handshake's carries the
+  token). The browser only talks to the dev server, so nothing is CORS and
+  nothing is preflighted, and the agent is unchanged
+- the proxy translates `Origin` rather than forging it: a request that is
+  same-origin to the dev server (its own `Origin` and `Host`, or no `Origin`
+  with `Sec-Fetch-Site: same-origin` and its own `Host`) is presented with the
+  agent's origin, and anything else is passed through untouched for the
+  agent's own rules to reject. It never adds, reads or checks the token
+- `dev/dev.test.ts` runs all of that against a real agent, twice in a row,
+  on ports read from the processes that chose them
 
 Rules
 - TODO
