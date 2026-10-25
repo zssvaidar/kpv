@@ -5,6 +5,7 @@
   "type": "module",
   "description": "kpv web front end: the Vite + React shell, its typed agent client and the development proxy",
   "scripts": {
+    "dev": "node dev/dev.ts",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json"
   },
