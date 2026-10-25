@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The page is opened with the session token in its URL. No request it
+      makes may carry that URL onward as a Referer, including the ones for
+      its own script, which load before the script can strip it.
+    -->
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <title>kpv</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

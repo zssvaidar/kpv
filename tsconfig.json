@@ -8,5 +8,9 @@
       "@kpv/schema": ["./packages/schema/src/index.ts"]
     }
   },
-  "include": ["packages/*/src/**/*.ts", "vitest.config.ts", "eslint.config.mjs"]
+  "include": [
+    "packages/schema/src/**/*.ts",
+    "vitest.config.ts",
+    "eslint.config.mjs"
+  ]
 }

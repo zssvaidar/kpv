@@ -16,7 +16,7 @@
     "test:ts": "vitest run",
     "test:go": "cd agent && go test ./...",
     "typecheck": "pnpm run typecheck:ts && pnpm run typecheck:go",
-    "typecheck:ts": "tsc -p tsconfig.json",
+    "typecheck:ts": "tsc -p tsconfig.json && pnpm -r run typecheck",
     "typecheck:go": "cd agent && go vet ./...",
     "lint": "pnpm run lint:ts && pnpm run lint:format && pnpm run lint:go",
     "lint:ts": "eslint .",

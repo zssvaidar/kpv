@@ -1,0 +1,117 @@
+/* Layout only. Colours, type and spacing as a system are #53. */
+
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 1fr minmax(16rem, 22rem);
+  grid-template-rows: auto 1fr minmax(4rem, 12rem);
+  grid-template-areas:
+    'status status'
+    'graph side'
+    'bottom bottom';
+  height: 100%;
+}
+
+.status-bar {
+  grid-area: status;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid GrayText;
+}
+
+.graph-area {
+  grid-area: graph;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.side-panel {
+  grid-area: side;
+  overflow: auto;
+  padding: 1rem;
+  border-left: 1px solid GrayText;
+}
+
+.bottom-panel {
+  grid-area: bottom;
+  overflow: auto;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid GrayText;
+}
+
+.side-panel h2 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.product {
+  font-weight: bold;
+}
+
+.muted {
+  opacity: 0.7;
+}
+
+.connection::before {
+  content: '';
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  background: GrayText;
+}
+
+.connection[data-tone='ok']::before {
+  background: green;
+}
+
+.connection[data-tone='auth']::before {
+  background: orange;
+}
+
+.connection[data-tone='down']::before {
+  background: red;
+}
+
+.connection-notice {
+  max-width: 40rem;
+  padding: 1rem;
+  border: 2px solid GrayText;
+}
+
+.connection-notice[data-tone='auth'] {
+  border-color: orange;
+}
+
+.connection-notice[data-tone='down'] {
+  border-color: red;
+}
+
+.connection-notice h1 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+
+.directory-path {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.directory-entries {
+  padding-left: 1rem;
+  font-family: monospace;
+}
