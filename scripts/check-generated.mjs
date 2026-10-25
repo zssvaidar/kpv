@@ -21,11 +21,14 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const generatedPaths = [
   'schema/pipeline.schema.json',
   'schema/channel.schema.json',
+  'schema/directory.schema.json',
   'packages/schema/src/generated',
   'agent/internal/pipeline/models_gen.go',
   'agent/internal/pipeline/pipeline.schema.json',
   'agent/internal/channel/models_gen.go',
   'agent/internal/channel/channel.schema.json',
+  'agent/internal/httpapi/models_gen.go',
+  'agent/internal/httpapi/directory.schema.json',
 ];
 
 const git = (...args) =>

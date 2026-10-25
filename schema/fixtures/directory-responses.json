@@ -1,0 +1,272 @@
+{
+  "$comment": "The one set of directory-browsing response fixtures (#7). Both toolchains read this file: agent/internal/httpapi/directory_fixtures_test.go and packages/schema/src/directory-fixtures.test.ts. Never copy it per language. listings are DirectoryListing answers, errors are DirectoryError answers; each side checks them against the authoritative JSON Schema and against what it was generated into.",
+  "listings": {
+    "valid": [
+      {
+        "name": "a-project-directory",
+        "why": "Every entry kind the endpoint reports, a link inside and a link outside, an unreadable directory and an entry that could not be described, with the evidence that makes it look like a project.",
+        "body": {
+          "path": "/home/user/code",
+          "parent": "/home/user",
+          "entries": [
+            {
+              "name": ".git",
+              "path": "/home/user/code/.git",
+              "kind": "directory",
+              "unreadable": false
+            },
+            {
+              "name": "go.mod",
+              "path": "/home/user/code/go.mod",
+              "kind": "file",
+              "unreadable": false
+            },
+            {
+              "name": "latest",
+              "path": "/home/user/code/latest",
+              "kind": "symlink",
+              "unreadable": false,
+              "linkTarget": "directory"
+            },
+            {
+              "name": "locked",
+              "path": "/home/user/code/locked",
+              "kind": "directory",
+              "unreadable": true
+            },
+            {
+              "name": "opaque",
+              "path": "/home/user/code/opaque",
+              "kind": "unknown",
+              "unreadable": true
+            },
+            {
+              "name": "to-etc",
+              "path": "/home/user/code/to-etc",
+              "kind": "symlink",
+              "unreadable": false,
+              "linkTarget": "outside"
+            }
+          ],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": true,
+          "evidence": [
+            {
+              "marker": ".git",
+              "describes": "a Git repository"
+            },
+            {
+              "marker": "go.mod",
+              "describes": "a Go module"
+            }
+          ]
+        }
+      },
+      {
+        "name": "the-top-of-home",
+        "why": "No parent, because the directory above home is not browsable, and nothing in it. An empty directory still has an entries array and an evidence array.",
+        "body": {
+          "path": "/home/user",
+          "entries": [],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": false,
+          "evidence": []
+        }
+      },
+      {
+        "name": "a-truncated-page",
+        "why": "A page holding exactly its limit, with the truncation marked.",
+        "body": {
+          "path": "/home/user",
+          "entries": [
+            {
+              "name": "a",
+              "path": "/home/user/a",
+              "kind": "file",
+              "unreadable": false
+            }
+          ],
+          "truncated": true,
+          "limit": 1,
+          "looksLikeProject": false,
+          "evidence": []
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-truncated-flag",
+        "why": "Whether the page is all of the directory is never left for a client to guess.",
+        "body": {
+          "path": "/home/user",
+          "entries": [],
+          "limit": 1000,
+          "looksLikeProject": false,
+          "evidence": []
+        }
+      },
+      {
+        "name": "no-evidence",
+        "why": "The evidence is always there, empty when there is none.",
+        "body": {
+          "path": "/home/user",
+          "entries": [],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": false
+        }
+      },
+      {
+        "name": "an-entry-kind-that-does-not-exist",
+        "why": "A client branches on the kind, so it is one of the five.",
+        "body": {
+          "path": "/home/user",
+          "entries": [
+            {
+              "name": "a",
+              "path": "/home/user/a",
+              "kind": "junction",
+              "unreadable": false
+            }
+          ],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": false,
+          "evidence": []
+        }
+      },
+      {
+        "name": "an-entry-with-no-unreadable-flag",
+        "why": "Readability is stated for every entry, not only for the unreadable ones.",
+        "body": {
+          "path": "/home/user",
+          "entries": [
+            {
+              "name": "a",
+              "path": "/home/user/a",
+              "kind": "file"
+            }
+          ],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": false,
+          "evidence": []
+        }
+      },
+      {
+        "name": "a-link-target-that-does-not-exist",
+        "why": "What a link leads to is one of the six answers.",
+        "body": {
+          "path": "/home/user",
+          "entries": [
+            {
+              "name": "a",
+              "path": "/home/user/a",
+              "kind": "symlink",
+              "unreadable": false,
+              "linkTarget": "elsewhere"
+            }
+          ],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": false,
+          "evidence": []
+        }
+      },
+      {
+        "name": "a-limit-above-the-cap",
+        "why": "No page is larger than 1000.",
+        "body": {
+          "path": "/home/user",
+          "entries": [],
+          "truncated": false,
+          "limit": 1001,
+          "looksLikeProject": false,
+          "evidence": []
+        }
+      },
+      {
+        "name": "a-resolved-path-on-the-side",
+        "why": "The listing carries nothing beyond its own fields, so nothing describing the filesystem can ride along.",
+        "body": {
+          "path": "/home/user",
+          "entries": [],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": false,
+          "evidence": [],
+          "resolved": "/etc"
+        }
+      },
+      {
+        "name": "an-empty-parent",
+        "why": "A directory with no browsable parent leaves parent out rather than sending an empty string.",
+        "body": {
+          "path": "/home/user",
+          "entries": [],
+          "truncated": false,
+          "limit": 1000,
+          "looksLikeProject": false,
+          "evidence": [],
+          "parent": ""
+        }
+      }
+    ]
+  },
+  "errors": {
+    "valid": [
+      {
+        "name": "forbidden",
+        "why": "A path outside the browsable directories: a kind and a fixed sentence, nothing else.",
+        "body": {
+          "error": "forbidden",
+          "message": "only the authorized project directories and the home directory can be browsed"
+        }
+      },
+      {
+        "name": "not-found",
+        "why": "A path inside them that does not exist.",
+        "body": {
+          "error": "notFound",
+          "message": "this directory does not exist"
+        }
+      },
+      {
+        "name": "unreadable",
+        "why": "A path inside them the agent may not read.",
+        "body": {
+          "error": "unreadable",
+          "message": "the agent is not permitted to read this directory"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "a-kind-that-does-not-exist",
+        "why": "A client branches on the kind.",
+        "body": {
+          "error": "denied",
+          "message": "no"
+        }
+      },
+      {
+        "name": "no-message",
+        "why": "Every error has a sentence for a person.",
+        "body": {
+          "error": "forbidden"
+        }
+      },
+      {
+        "name": "a-resolved-path-on-the-side",
+        "why": "A refusal carries no resolved path, root or cause, which is what keeps it from describing what is outside.",
+        "body": {
+          "error": "forbidden",
+          "message": "only the authorized project directories and the home directory can be browsed",
+          "resolved": "/etc/shadow"
+        }
+      }
+    ]
+  }
+}

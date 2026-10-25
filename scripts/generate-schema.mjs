@@ -6,12 +6,14 @@
 // it, and `pnpm run generate:check` (which CI runs) regenerates and fails when
 // the committed output differs, which is also what catches a hand-edit.
 //
-// There are two schemas, and they are separate files because they describe
+// There are three schemas, and they are separate files because they describe
 // separate things:
-//   - schema/pipeline.schema.json  the pipeline model
-//   - schema/channel.schema.json   the envelope the agent pushes over the
-//                                  WebSocket channel (#5), which carries a
-//                                  pipeline id but is not a pipeline
+//   - schema/pipeline.schema.json   the pipeline model
+//   - schema/channel.schema.json    the envelope the agent pushes over the
+//                                   WebSocket channel (#5), which carries a
+//                                   pipeline id but is not a pipeline
+//   - schema/directory.schema.json  what the directory browsing endpoint
+//                                   answers (#7), a listing or an error
 // Each one generates the same four artifacts: TypeScript types, Zod schemas,
 // the raw schema as a module, and Go structs plus a copy of the schema the Go
 // module can embed.
@@ -67,6 +69,20 @@ const schemas = [
     rawConst: 'channelJsonSchema',
     goPackage: 'channel',
     goDir: join('agent', 'internal', 'channel'),
+  },
+  {
+    file: 'directory.schema.json',
+    prefix: 'directory',
+    rootName: 'DirectoryListing',
+    rootConst: 'directoryListingSchema',
+    rawConst: 'directoryJsonSchema',
+    goPackage: 'httpapi',
+    goDir: join('agent', 'internal', 'httpapi'),
+    // The error answer is a definition nothing in the listing refers to, and
+    // a client needs its type as much as the listing's, so the TypeScript
+    // side is generated for every definition rather than only the reachable
+    // ones.
+    unreachableDefinitions: true,
   },
 ];
 
@@ -336,6 +352,7 @@ const generate = async (spec, schema, schemaSource) => {
         enableConstEnums: false,
         format: false,
         unknownAny: true,
+        unreachableDefinitions: spec.unreachableDefinitions === true,
       })),
   );
   await writeFormatted(
