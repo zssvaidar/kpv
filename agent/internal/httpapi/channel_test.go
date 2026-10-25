@@ -729,13 +729,16 @@ func TestNewHandlerRegistersTheTableAndTheChannelAndNothingElse(t *testing.T) {
 		return true
 	})
 
-	want := map[string]bool{"r.pattern": true, "channelPattern": true}
+	// directoriesPattern is the directory browsing endpoint (#7), registered
+	// the same way for the same reason, and held to the same rejection matrix
+	// in directories_test.go.
+	want := map[string]bool{"r.pattern": true, "channelPattern": true, "directoriesPattern": true}
 	if len(registered) != len(want) {
 		t.Fatalf("newHandler registers %v; this test and the rejection table above know about %v, so one of them needs updating", registered, want)
 	}
 	for _, pattern := range registered {
 		if !want[pattern] {
-			t.Errorf("newHandler registers %s, which no test here covers; add it to the rejection table and to this list", pattern)
+			t.Errorf("newHandler registers %s, which no test covers; add it to a rejection table and to this list", pattern)
 		}
 	}
 	if channelPattern != "GET /api/channel" {

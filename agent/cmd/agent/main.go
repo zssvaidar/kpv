@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/zssvaidar/kpv/agent/internal/httpapi"
+	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 	"github.com/zssvaidar/kpv/agent/internal/version"
 )
 
@@ -34,8 +35,13 @@ func main() {
 // reaches the browser. The logger deliberately gets the address only, so a
 // redirected log never contains the token.
 func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
-	server, err := httpapi.New(httpapi.Options{Logger: logger})
+	browser, err := newBrowser(logger)
 	if err != nil {
+		return nil, err
+	}
+	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser})
+	if err != nil {
+		_ = browser.Close()
 		return nil, err
 	}
 	lines := fmt.Sprintf("kpv agent %s\nlistening on %s\nopen %s\n", version.String(), server.Addr(), server.StartupURL())
@@ -48,4 +54,28 @@ func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
 		return nil, fmt.Errorf("the startup lines could not be written: %w", err)
 	}
 	return server, nil
+}
+
+// newBrowser builds what the directory browsing endpoint reads through: the
+// guard holding the authorized project roots, which starts with none, plus the
+// user's home directory as a browse-only allowance.
+//
+// A home directory that cannot be found or opened is not a failed startup:
+// the agent still serves, and browsing is then limited to the authorized
+// roots. Which home it was is not logged, only that there is none.
+func newBrowser(logger *slog.Logger) (*projectfs.Browser, error) {
+	guard, err := projectfs.New()
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		browser, browseErr := projectfs.NewBrowser(guard, home)
+		if browseErr == nil {
+			return browser, nil
+		}
+		err = browseErr
+	}
+	logger.Warn("the home directory cannot be browsed, so only authorized project directories can", "kind", string(projectfs.KindOf(err)))
+	return projectfs.NewBrowser(guard, "")
 }

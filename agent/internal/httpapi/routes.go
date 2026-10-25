@@ -22,10 +22,12 @@ type route struct {
 
 // apiRoutes is every route the agent serves.
 //
-// None of them touches the filesystem: reading and writing pipeline.yaml
-// exists in internal/pipeline already, and it is deliberately not wired up
-// here, because a route that reads a path needs the path authorization that is
-// #6. These two answer out of memory and out of the build.
+// None of them touches the filesystem; these two answer out of memory and out
+// of the build. The one route that reads the filesystem is the directory
+// browsing endpoint, which is not a row here (see directoriesPattern) and
+// reaches the filesystem only through the projectfs.Browser the guard
+// carries. internal/pipeline is still not wired up: its store hands back a
+// path to open, which is the weaker route #6 documented, and #48 moves it.
 func apiRoutes() []route {
 	return []route{
 		{"GET /api/health", handleHealth},
@@ -48,6 +50,9 @@ func newHandler(g *guard, routes []route) http.Handler {
 	// channelPattern in channel.go for why it is registered here instead of
 	// being a row in the table.
 	mux.Handle(channelPattern, g.channelRoute())
+	// The directory browsing endpoint is registered here for the same reason;
+	// see directoriesPattern in directories.go.
+	mux.Handle(directoriesPattern, g.directoriesRoute())
 	return g.wrap(mux)
 }
 
@@ -67,6 +72,12 @@ func handleVersion(w http.ResponseWriter, _ *http.Request) {
 // written, so a marshalling failure cannot leave a half-written body behind a
 // 200; it is also why no handler can accidentally stream a partial answer.
 func writeJSON(w http.ResponseWriter, value any) {
+	writeJSONStatus(w, http.StatusOK, value)
+}
+
+// writeJSONStatus is writeJSON with a status other than 200, which is how the
+// directory browsing endpoint answers a request it could not serve.
+func writeJSONStatus(w http.ResponseWriter, status int, value any) {
 	body, err := json.Marshal(value)
 	if err != nil {
 		// Nothing in this package marshals anything that can fail, so this is
@@ -79,6 +90,6 @@ func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

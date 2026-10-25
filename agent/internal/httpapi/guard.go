@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zssvaidar/kpv/agent/internal/channel"
+	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 )
 
 // tokenParameter is the query parameter the session token may arrive in, and
@@ -38,6 +39,12 @@ type guard struct {
 	// A nil channel means a server with no channel, which answers the route
 	// with the same rejection as anything else. Only a test builds one.
 	channel *channel.Hub
+	// browser is what the directory browsing endpoint reads through (#7),
+	// carried here for the same reason the channel is. It is a read-only
+	// view: nothing reachable from it writes, and it hands out descriptions,
+	// never a path to open. A nil browser answers the route with the same
+	// rejection as anything else.
+	browser *projectfs.Browser
 }
 
 // wrap returns next behind the checks. Every request, including one that

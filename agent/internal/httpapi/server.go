@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/zssvaidar/kpv/agent/internal/channel"
+	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 )
 
 // loopbackHost is the only address the agent binds. It is IPv4 loopback
@@ -73,6 +74,11 @@ type Options struct {
 	// have to sit out a real interval. Its Logger is ignored: the channel
 	// logs to the server's logger, so there is one log.
 	Channel channel.Options
+	// Browser is what the directory browsing endpoint reads through: the
+	// authorized project roots plus the user's home directory, read-only.
+	// The caller owns it and closes it. A nil Browser serves no directory
+	// browsing, and the route answers the uniform rejection.
+	Browser *projectfs.Browser
 }
 
 // Server is the agent's local HTTP API, bound and ready to serve.
@@ -133,7 +139,7 @@ func New(options Options) (*Server, error) {
 	channelOptions.AllowedOrigins = origins.origins()
 	hub := channel.New(channelOptions)
 
-	g := &guard{token: token, origins: origins, logger: logger, channel: hub}
+	g := &guard{token: token, origins: origins, logger: logger, channel: hub, browser: options.Browser}
 	server := &Server{
 		token:    token,
 		listener: listener,

@@ -106,9 +106,10 @@ func TestTheTokenSourceIsCryptographic(t *testing.T) {
 	}
 }
 
-// No route may read the filesystem: the path authorization that would make
-// that safe is #6, and until it exists the agent's API answers out of memory.
-// A response cannot show this, so the imports do.
+// No route may reach the filesystem except through internal/projectfs, which
+// is where every path is checked (#6). A response cannot show this, so the
+// imports do: nothing here imports a package that opens a file, and the
+// directory browsing endpoint (#7) reads through a projectfs.Browser only.
 func TestNothingInThisPackageCanReachTheFilesystem(t *testing.T) {
 	t.Parallel()
 	_, files := parsePackage(t)
@@ -118,10 +119,52 @@ func TestNothingInThisPackageCanReachTheFilesystem(t *testing.T) {
 		for _, path := range importsOf(t, file) {
 			for _, forbidden := range banned {
 				if path == forbidden {
-					t.Errorf("%s imports %s, so a route here could reach the filesystem; that needs the path guard in #6 first", name, path)
+					t.Errorf("%s imports %s, so a route here could reach the filesystem without going through the path guard in internal/projectfs", name, path)
 				}
 			}
 		}
+	}
+}
+
+// The home directory is browsable without being authorized (#7), and the way
+// that stays a browse allowance rather than becoming a write path is that this
+// package is never handed anything that writes. It holds a projectfs.Browser,
+// which only lists, and it never names the Guard or a Path, which are the
+// types that read and write files. This lists every projectfs name the
+// package's source uses and fails on any outside the read-only set, so a
+// route that grows a write, or a handle to one, has to change this list in
+// plain sight first.
+func TestThisPackageUsesOnlyTheReadOnlyPartOfProjectfs(t *testing.T) {
+	t.Parallel()
+	fileSet, files := parsePackage(t)
+
+	readOnly := map[string]bool{
+		"projectfs.Browser": true, "projectfs.Listing": true, "projectfs.MaxListing": true,
+		"projectfs.KindOf": true, "projectfs.KindForbidden": true, "projectfs.KindNotFound": true,
+		"projectfs.KindUnreadable": true, "projectfs.KindNotDirectory": true, "projectfs.KindInvalid": true,
+	}
+	used := map[string]bool{}
+	for name, file := range files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if pkg, ok := selector.X.(*ast.Ident); !ok || pkg.Name != "projectfs" {
+				return true
+			}
+			written := source(t, fileSet, selector)
+			used[written] = true
+			if !readOnly[written] {
+				t.Errorf("%s uses %s, which is not part of the read-only browsing surface; this package must not be able to write a file", name, written)
+			}
+			return true
+		})
+	}
+	// Non-vacuity: the browsing endpoint does use projectfs, so finding no
+	// use at all means this is looking at the wrong thing.
+	if !used["projectfs.Browser"] || !used["projectfs.KindOf"] {
+		t.Fatalf("found only %v from projectfs; this test is not seeing the browsing endpoint", used)
 	}
 }
 

@@ -55,6 +55,13 @@ exists. The one thing the two schemas share is what a pipeline id looks like,
 and a `$ref` cannot cross files, so the pattern is written twice and
 `scripts/generate-schema.mjs` fails generation when the two copies drift.
 
+`schema/directory.schema.json` is the third, the same rules again: what the
+directory browsing endpoint answers (#7), a `DirectoryListing` or a
+`DirectoryError`, generated into `packages/schema/src/generated/directory-*.ts`
+and `agent/internal/httpapi/models_gen.go` plus a copy of the schema there,
+with shared fixtures in `schema/fixtures/directory-responses.json`. The copy is
+read by the tests only: `httpapi` may not import `embed`.
+
 Generated output is committed, and `pnpm generate:check` regenerates it and
 fails on any diff. That is what catches a stale schema and a hand-edited
 generated file, so never edit anything under a generated path by hand.
@@ -151,11 +158,20 @@ prints the URL to open and serves.
   acted on, so the timing does not tell them apart either
 - read, read-header, write and idle timeouts are set, and the header size is
   capped well below `net/http`'s 1MB default
-- no route here reads the filesystem: `internal/pipeline` is deliberately not
-  wired up, because a route that reads a path needs the path guard in #6.
-  `source_test.go` asserts that, and the two claims a response cannot show:
-  the token source is `crypto/rand` and the comparison is
+- no route here reaches the filesystem except through `internal/projectfs`:
+  nothing imports `os`, `io/fs` or `path/filepath`, and the only projectfs
+  names used are the read-only browsing ones. `internal/pipeline` is still
+  not wired up. `source_test.go` asserts both, and the two claims a response
+  cannot show: the token source is `crypto/rand` and the comparison is
   `subtle.ConstantTimeCompare` over digests, which does not leak length
+- `GET /api/directories` is directory browsing (#7), registered by
+  `newHandler` beside the channel for the same reason, and covered by the same
+  rejection matrix in `directories_test.go`. `path` (absolute, default the
+  home directory) and `limit` (1 to 1000, default 1000). It reads through a
+  `projectfs.Browser`: the authorized roots plus the home directory,
+  read-only. An error answers a kind and a fixed sentence and nothing from the
+  underlying error, because a projectfs refusal can describe what is outside
+  the roots
 - `GET /api/channel` is the push channel (#5). It is registered by
   `newHandler`, on the same mux, inside the same wrap, rather than being a row
   in `apiRoutes()`: every row is a request-and-an-answer route and the table's
