@@ -96,16 +96,6 @@ func (f *fixture) symlink(target, relative string) {
 	}
 }
 
-// replaceSymlink swaps the link at relative for one pointing somewhere else,
-// which is the move a validate-then-open design loses to.
-func (f *fixture) replaceSymlink(target, relative string) {
-	f.t.Helper()
-	if err := os.Remove(f.at(relative)); err != nil {
-		f.t.Fatalf("remove %s: %v", relative, err)
-	}
-	f.symlink(target, relative)
-}
-
 // refused asserts that err is this package refusing a path, and that nothing
 // can mistake the refusal for a file that is simply not there.
 func refused(t *testing.T, err error, what string) {

@@ -101,8 +101,40 @@ func (e *PathError) Error() string {
 	return out.String()
 }
 
-// Unwrap exposes the underlying cause, so errors.Is and errors.As reach it.
-func (e *PathError) Unwrap() error { return e.Err }
+// Unwrap exposes the underlying cause, so errors.As reaches it, behind a
+// mask that stops it answering for the kind.
+//
+// The mask is load-bearing rather than tidy. errors.Is does not stop when Is
+// answers no: it keeps unwrapping. So a KindForbidden refusal that carried an
+// ENOENT cause -- which it does, whenever the kernel's reason for refusing was
+// phrased as one -- would still answer yes to errors.Is(err, fs.ErrNotExist),
+// and a caller would read a refusal as a file that is simply not there. The
+// mask ends the walk for the three io/fs sentinels the kind owns, and passes
+// everything else through, so errors.Is for an errno and errors.As for the
+// *fs.PathError underneath both still work.
+func (e *PathError) Unwrap() error {
+	if e.Err == nil {
+		return nil
+	}
+	return cause{e.Err}
+}
+
+// cause carries a *PathError's underlying error without letting it answer the
+// three questions the kind answers. It deliberately has no Unwrap method: that
+// is what ends errors.Is's walk here rather than continuing into the cause.
+type cause struct{ err error }
+
+func (c cause) Error() string { return c.err.Error() }
+
+func (c cause) Is(target error) bool {
+	switch target {
+	case fs.ErrNotExist, fs.ErrPermission, fs.ErrInvalid:
+		return false
+	}
+	return errors.Is(c.err, target)
+}
+
+func (c cause) As(target any) bool { return errors.As(c.err, target) }
 
 // Is maps a kind onto the io/fs sentinels, so an ordinary caller can write
 // errors.Is(err, fs.ErrNotExist) and get the answer the kind gives rather than
