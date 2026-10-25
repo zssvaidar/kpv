@@ -15,6 +15,16 @@
 // "/home/user/projectX" is not inside "/home/user/project" and neither is
 // "/home/user/Project". See realPath and within in resolve.go.
 //
+// A ".." in the caller's path is honoured only when the directory it lands on
+// is inside an authorized root. One that climbs out is refused as forbidden at
+// that segment, even when the rest of the path would come back in, and before
+// anything after it is looked up: "root/../x/../root/file" is refused without x
+// ever being asked about, so the answer is the same whether x is a directory,
+// a file or nothing. Symbolic link targets are not held to this. A link is
+// judged by where it really leads, like any other, because its target was
+// written by someone who could already write the root, not by the caller. See
+// walk in resolve.go.
+//
 // Authorization is enforced again when the file is opened, by the kernel, and
 // not by re-reading the path. Each authorized root is held open as an *os.Root
 // (Go 1.24), which is a directory descriptor plus a resolver that walks each
@@ -301,7 +311,13 @@ func (g *Guard) resolve(op, given string) (Path, error) {
 		}
 	}
 
-	resolved, missing, resolveErr := realPath(absolutePath)
+	resolved, missing, resolveErr := walk(absolutePath, func(candidate string) bool {
+		owner, _ := g.locate(candidate)
+		return owner != nil
+	})
+	if errors.Is(resolveErr, errClimbsOut) {
+		return Path{}, g.climbedOut(op, given)
+	}
 	base, tail, climbed := reduceTail(resolved, missing)
 	candidate := base
 	if len(tail) > 0 {
@@ -341,6 +357,9 @@ func (g *Guard) resolve(op, given string) (Path, error) {
 	return Path{owner: owner, relative: relative, real: candidate, given: given}, nil
 }
 
+// notInsideMessage is the wording of the plain refusal.
+const notInsideMessage = "this path is not inside any authorized project directory"
+
 // forbidden is the one refusal this package exists for, worded the same way
 // whatever the path was, and carrying no root: a path that belongs to no root
 // has nothing to be reported against.
@@ -349,7 +368,7 @@ func (g *Guard) forbidden(op, given, resolved string) *PathError {
 	closed := g.closed
 	count := len(g.roots)
 	g.mutex.RUnlock()
-	message := "this path is not inside any authorized project directory"
+	message := notInsideMessage
 	switch {
 	case closed:
 		message = "this guard is closed, so no path is authorized"
@@ -359,6 +378,19 @@ func (g *Guard) forbidden(op, given, resolved string) *PathError {
 	return &PathError{
 		Op: op, Path: given, Resolved: resolved, Kind: KindForbidden, Message: message,
 	}
+}
+
+// climbedOut is the refusal for a path with a ".." that climbs out of the
+// authorized roots. It is decided before anything past that ".." is looked up,
+// and it carries nothing but the caller's own path: no resolved path, no root
+// and no cause, so the same refusal comes back whether what the path names
+// outside the roots is a directory, a file or nothing at all.
+func (g *Guard) climbedOut(op, given string) *PathError {
+	refusal := g.forbidden(op, given, "")
+	if refusal.Message == notInsideMessage {
+		refusal.Message = `this path has a ".." that climbs out of the authorized project directories`
+	}
+	return refusal
 }
 
 // locate finds the authorized root a real path belongs to, and the path from

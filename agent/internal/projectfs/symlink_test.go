@@ -94,14 +94,24 @@ func TestALinkWhoseIntermediatePathIsInsideAndFinalTargetIsOutsideIsRefused(t *t
 	f.symlink(f.at("outside"), filepath.Join("project", "a", "hop"))
 	f.symlink(f.in("inside"), filepath.Join("outside", "back"))
 	refused(t, mustFail(f.guard.ReadFile(f.in("a", "hop", "secret.txt"))), "a file reached through a link that leaves")
-	// Through the link out and then back in: the real path is inside the
-	// root, so this one is allowed, and it reads the file inside.
+	// Through the link out and then back in through another link: the real
+	// path is inside the root, so this one is allowed, and it reads the file
+	// inside. Links are judged by where they really lead. The caller wrote no
+	// ".." here; the targets were written by whoever could write the root.
 	data, err := f.guard.ReadFile(f.in("a", "hop", "back", "ok.txt"))
 	if err != nil {
 		t.Fatalf("a path whose real target is inside the root was refused: %v", err)
 	}
 	if string(data) != "ok" {
 		t.Errorf("read %q, want %q", data, "ok")
+	}
+	// But the caller's own ".." after that link is out of the root, and a ".."
+	// that climbs out is refused even when the path would come back in.
+	for _, path := range []string{
+		f.in("a", "hop") + "/../project/inside/ok.txt",
+		f.in("a", "hop") + "/../outside/back/ok.txt",
+	} {
+		refused(t, mustFail(f.guard.ReadFile(path)), "reading "+path)
 	}
 }
 

@@ -58,7 +58,8 @@ func TestEquivalentSpellingsOfAnAcceptedPathResolveToTheSameFile(t *testing.T) {
 		{"doubled separators", f.root + "//inside//ok.txt", file},
 		{"dot segments", f.root + "/./inside/./ok.txt", file},
 		{"up and back down inside the root", f.root + "/inside/deep/../ok.txt", file},
-		{"up and back down through the root itself", f.root + "/../project/inside/ok.txt", file},
+		// Up through the root itself and back down is not here: it is refused,
+		// in TestLeavingTheRootAndComingBackIsRefusedWhateverIsOutside.
 	} {
 		t.Run(spelling.name, func(t *testing.T) {
 			t.Parallel()
