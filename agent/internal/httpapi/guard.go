@@ -45,6 +45,11 @@ type guard struct {
 	// never a path to open. A nil browser answers the route with the same
 	// rejection as anything else.
 	browser *projectfs.Browser
+	// roots is what the project root endpoints authorize and revoke through
+	// (#63), carried here for the same reason again. It decides which
+	// directory may be a root and hands back strings, never a Guard or a
+	// Path. A nil roots answers those routes with the uniform rejection.
+	roots *projectfs.Roots
 }
 
 // wrap returns next behind the checks. Every request, including one that

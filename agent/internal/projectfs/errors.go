@@ -38,6 +38,20 @@ const (
 	KindInvalid ErrorKind = "invalid"
 	// KindIO is any other failure of the filesystem itself.
 	KindIO ErrorKind = "io"
+
+	// The three kinds below are about which directory may become a project
+	// root (#63), and only Roots reports them.
+
+	// KindTooBroad is a directory that would make too much a project: the
+	// filesystem root, the home directory itself, or anything above it.
+	KindTooBroad ErrorKind = "tooBroad"
+	// KindOverlaps is a directory inside a stored root, or one that contains
+	// a stored root. One file belongs to exactly one root.
+	KindOverlaps ErrorKind = "overlaps"
+	// KindChanged is a stored root that now resolves to a different real path
+	// than the one that was authorized, which is what replacing a component of
+	// it with a symbolic link does.
+	KindChanged ErrorKind = "changed"
 )
 
 // PathError is the one structured failure this package reports. Every field

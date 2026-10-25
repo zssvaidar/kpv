@@ -63,6 +63,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // root is one authorized project root: the spelling the user authorized, the
@@ -83,10 +84,25 @@ type root struct {
 	// through.
 	directory *os.Root
 
+	// revoked is set when the root stops being authorized, by Revoke or by
+	// Close, before its descriptor is closed. Every Path holds the root it was
+	// resolved against, so this is what makes a handle taken earlier stop
+	// working: Path.usable refuses it, and the closed descriptor refuses
+	// anything already past that check.
+	revoked atomic.Bool
+
 	// escapeOnce and escaped hold os.Root's own refusal error, asked for once
 	// and compared against afterwards. See escapeSentinel.
 	escapeOnce sync.Once
 	escaped    error
+}
+
+// release ends this root's authorization: first the flag every Path checks,
+// then the descriptor. os.Root counts the operations in flight on it, so one
+// that started before the release finishes, and none can start after it.
+func (r *root) release() error {
+	r.revoked.Store(true)
+	return r.directory.Close()
 }
 
 // escapeSentinel is the error os.Root returns when a path would leave the
@@ -159,6 +175,16 @@ func New(roots ...string) (*Guard, error) {
 // any spelling that resolves to the same directory, is accepted again and
 // changes nothing.
 func (g *Guard) Authorize(candidate string) (string, error) {
+	return g.authorize(candidate, nil)
+}
+
+// authorize is Authorize with one more check, made after the directory has
+// been opened and before it is added: verify is handed the real path and the
+// open descriptor, and a non-nil answer refuses the root and closes it again.
+// Roots uses it to confirm that the directory opened is the one it checked,
+// so a component swapped for a link between its check and this open cannot
+// authorize somewhere else.
+func (g *Guard) authorize(candidate string, verify func(realDir string, opened *os.Root) error) (string, error) {
 	fail := func(kind ErrorKind, message string, err error) (string, error) {
 		return "", &PathError{Op: "authorize", Path: candidate, Kind: kind, Message: message, Err: err}
 	}
@@ -214,8 +240,77 @@ func (g *Guard) Authorize(candidate string) (string, error) {
 	if err != nil {
 		return fail(KindIO, "the directory to authorize could not be opened", err)
 	}
+	if verify != nil {
+		if err := verify(resolved, directory); err != nil {
+			_ = directory.Close()
+			return "", err
+		}
+	}
 	g.roots = append(g.roots, &root{given: candidate, real: resolved, directory: directory})
 	return resolved, nil
+}
+
+// Revoke removes an authorized root and returns the real path it was
+// authorized as.
+//
+// The root may be named by its real path, with or without a trailing
+// separator, or by any spelling that resolves to it, the link it was
+// authorized through included. A nested root inside or around it is a root of
+// its own and is left alone.
+//
+// Revoking is the same as Close for that one root: nothing resolves into it
+// any more, and a Path taken before the revoke stops working, because the
+// root it holds is marked revoked and its descriptor closed. An operation that
+// was already running when Revoke was called may finish; nothing that starts
+// after Revoke returns reaches the directory. Nothing on disk is touched.
+//
+// A path that is not an authorized root is KindNotFound.
+func (g *Guard) Revoke(candidate string) (string, error) {
+	if err := usablePath(candidate); err != nil {
+		var fault *PathError
+		if errors.As(err, &fault) {
+			fault.Op = "revoke"
+		}
+		return "", err
+	}
+	notAuthorized := &PathError{
+		Op: "revoke", Path: candidate, Kind: KindNotFound,
+		Message: "this path is not an authorized project directory",
+	}
+	// The exact real path first, which needs nothing from the filesystem
+	// and so still works for a root whose directory has since gone.
+	if filepath.IsAbs(candidate) {
+		if realDir, ok := g.revokeExact(filepath.Clean(candidate)); ok {
+			return realDir, nil
+		}
+	}
+	absolutePath, err := absolute(candidate)
+	if err != nil {
+		return "", notAuthorized
+	}
+	resolved, missing, err := realPath(absolutePath)
+	if err != nil || len(missing) > 0 {
+		return "", notAuthorized
+	}
+	if realDir, ok := g.revokeExact(resolved); ok {
+		return realDir, nil
+	}
+	return "", notAuthorized
+}
+
+// revokeExact revokes the root whose real path is exactly real.
+func (g *Guard) revokeExact(realDir string) (string, bool) {
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+	for index, authorized := range g.roots {
+		if authorized.real != realDir {
+			continue
+		}
+		g.roots = append(g.roots[:index:index], g.roots[index+1:]...)
+		_ = authorized.release()
+		return authorized.real, true
+	}
+	return "", false
 }
 
 // Roots returns the real paths of the authorized roots, in the order they were
@@ -239,7 +334,7 @@ func (g *Guard) Close() error {
 	g.closed = true
 	var first error
 	for _, authorized := range g.roots {
-		if err := authorized.directory.Close(); err != nil && first == nil {
+		if err := authorized.release(); err != nil && first == nil {
 			first = err
 		}
 	}

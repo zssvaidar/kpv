@@ -6,7 +6,7 @@
 // it, and `pnpm run generate:check` (which CI runs) regenerates and fails when
 // the committed output differs, which is also what catches a hand-edit.
 //
-// There are three schemas, and they are separate files because they describe
+// There are four schemas, and they are separate files because they describe
 // separate things:
 //   - schema/pipeline.schema.json   the pipeline model
 //   - schema/channel.schema.json    the envelope the agent pushes over the
@@ -14,6 +14,9 @@
 //                                   pipeline id but is not a pipeline
 //   - schema/directory.schema.json  what the directory browsing endpoint
 //                                   answers (#7), a listing or an error
+//   - schema/roots.schema.json      what the project root endpoints take and
+//                                   answer (#63): the root list, a request,
+//                                   an authorized root or an error
 // Each one generates the same four artifacts: TypeScript types, Zod schemas,
 // the raw schema as a module, and Go structs plus a copy of the schema the Go
 // module can embed.
@@ -82,6 +85,21 @@ const schemas = [
     // a client needs its type as much as the listing's, so the TypeScript
     // side is generated for every definition rather than only the reachable
     // ones.
+    unreachableDefinitions: true,
+  },
+  {
+    file: 'roots.schema.json',
+    prefix: 'roots',
+    rootName: 'RootList',
+    rootConst: 'rootListSchema',
+    rawConst: 'rootsJsonSchema',
+    goPackage: 'httpapi',
+    goDir: join('agent', 'internal', 'httpapi'),
+    // httpapi already holds the directory schema's models_gen.go, so this one
+    // gets a file of its own beside it.
+    goFile: 'roots_models_gen.go',
+    // The request, the authorized answer and the error are definitions the
+    // list does not refer to, and a client needs every one of them.
     unreachableDefinitions: true,
   },
 ];
@@ -373,7 +391,7 @@ const generate = async (spec, schema, schemaSource) => {
   writeFileSync(goSchemaCopy, schemaSource);
   written.push(goSchemaCopy);
 
-  const goModels = join(goDir, 'models_gen.go');
+  const goModels = join(goDir, spec.goFile ?? 'models_gen.go');
   execFileSync(
     'go',
     [

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/zssvaidar/kpv/agent/internal/httpapi"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
@@ -39,7 +40,12 @@ func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser})
+	roots, err := projectfs.OpenRoots(browser, storeFile(logger), logger)
+	if err != nil {
+		_ = browser.Close()
+		return nil, err
+	}
+	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser, Roots: roots})
 	if err != nil {
 		_ = browser.Close()
 		return nil, err
@@ -78,4 +84,22 @@ func newBrowser(logger *slog.Logger) (*projectfs.Browser, error) {
 	}
 	logger.Warn("the home directory cannot be browsed, so only authorized project directories can", "kind", string(projectfs.KindOf(err)))
 	return projectfs.NewBrowser(guard, "")
+}
+
+// rootsStoreName is the file the authorized project roots are kept in (#63),
+// in a kpv directory of the user's config directory: $XDG_CONFIG_HOME/kpv on
+// Linux, falling back to ~/.config/kpv. It is the agent's own file, never one
+// inside a project or the repository.
+const rootsStoreName = "roots.json"
+
+// storeFile is where the authorized roots are stored, or "" when there is no
+// config directory to keep them in, in which case they last as long as the
+// process. Which directory it was is not logged.
+func storeFile(logger *slog.Logger) string {
+	config, err := os.UserConfigDir()
+	if err != nil {
+		logger.Warn("there is no user config directory, so authorized project directories are not kept across restarts")
+		return ""
+	}
+	return filepath.Join(config, "kpv", rootsStoreName)
 }

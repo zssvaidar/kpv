@@ -129,12 +129,13 @@ func TestNothingInThisPackageCanReachTheFilesystem(t *testing.T) {
 // The home directory is browsable without being authorized (#7), and the way
 // that stays a browse allowance rather than becoming a write path is that this
 // package is never handed anything that writes. It holds a projectfs.Browser,
-// which only lists, and it never names the Guard or a Path, which are the
-// types that read and write files. This lists every projectfs name the
-// package's source uses and fails on any outside the read-only set, so a
-// route that grows a write, or a handle to one, has to change this list in
+// which only lists, and a projectfs.Roots (#63), which authorizes, revokes and
+// lists roots and hands back strings. It never names the Guard or a Path,
+// which are the types that read and write files. This lists every projectfs
+// name the package's source uses and fails on any outside those two sets, so
+// a route that grows a write, or a handle to one, has to change this list in
 // plain sight first.
-func TestThisPackageUsesOnlyTheReadOnlyPartOfProjectfs(t *testing.T) {
+func TestThisPackageUsesOnlyTheReadOnlyAndAuthorizationPartsOfProjectfs(t *testing.T) {
 	t.Parallel()
 	fileSet, files := parsePackage(t)
 
@@ -142,6 +143,18 @@ func TestThisPackageUsesOnlyTheReadOnlyPartOfProjectfs(t *testing.T) {
 		"projectfs.Browser": true, "projectfs.Listing": true, "projectfs.MaxListing": true,
 		"projectfs.KindOf": true, "projectfs.KindForbidden": true, "projectfs.KindNotFound": true,
 		"projectfs.KindUnreadable": true, "projectfs.KindNotDirectory": true, "projectfs.KindInvalid": true,
+	}
+	// Authorizing, revoking and listing roots (#63), and the kinds and the
+	// one detail their refusals carry. None of them reads or writes a file
+	// under a root: Roots hands back RootStatus values and strings.
+	authorization := map[string]bool{
+		"projectfs.Roots": true, "projectfs.RootStatus": true, "projectfs.OverlappedRoot": true,
+		"projectfs.KindTooBroad": true, "projectfs.KindOverlaps": true,
+	}
+	// Written out so the diff shows they are still refused, by name.
+	writes := []string{
+		"projectfs.Guard", "projectfs.Path", "projectfs.New", "projectfs.NewBrowser", "projectfs.OpenRoots",
+		"projectfs.PipelineSeam",
 	}
 	used := map[string]bool{}
 	for name, file := range files {
@@ -155,16 +168,21 @@ func TestThisPackageUsesOnlyTheReadOnlyPartOfProjectfs(t *testing.T) {
 			}
 			written := source(t, fileSet, selector)
 			used[written] = true
-			if !readOnly[written] {
-				t.Errorf("%s uses %s, which is not part of the read-only browsing surface; this package must not be able to write a file", name, written)
+			if !readOnly[written] && !authorization[written] {
+				t.Errorf("%s uses %s, which is neither the read-only browsing surface nor the root authorization one; this package must not be able to write a file", name, written)
 			}
 			return true
 		})
 	}
-	// Non-vacuity: the browsing endpoint does use projectfs, so finding no
-	// use at all means this is looking at the wrong thing.
-	if !used["projectfs.Browser"] || !used["projectfs.KindOf"] {
-		t.Fatalf("found only %v from projectfs; this test is not seeing the browsing endpoint", used)
+	for _, write := range writes {
+		if readOnly[write] || authorization[write] || used[write] {
+			t.Errorf("%s is allowed or used here, and it reaches files", write)
+		}
+	}
+	// Non-vacuity: both endpoints do use projectfs, so finding no use at all
+	// means this is looking at the wrong thing.
+	if !used["projectfs.Browser"] || !used["projectfs.KindOf"] || !used["projectfs.Roots"] {
+		t.Fatalf("found only %v from projectfs; this test is not seeing the browsing and root endpoints", used)
 	}
 }
 

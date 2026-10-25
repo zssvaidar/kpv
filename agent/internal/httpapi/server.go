@@ -79,6 +79,11 @@ type Options struct {
 	// The caller owns it and closes it. A nil Browser serves no directory
 	// browsing, and the route answers the uniform rejection.
 	Browser *projectfs.Browser
+	// Roots is what the project root endpoints list, authorize and revoke
+	// through (#63). It should be built over the same Browser, so a root
+	// authorized here is browsable at once. The caller owns it. A nil Roots
+	// serves none of those routes, and they answer the uniform rejection.
+	Roots *projectfs.Roots
 }
 
 // Server is the agent's local HTTP API, bound and ready to serve.
@@ -139,7 +144,7 @@ func New(options Options) (*Server, error) {
 	channelOptions.AllowedOrigins = origins.origins()
 	hub := channel.New(channelOptions)
 
-	g := &guard{token: token, origins: origins, logger: logger, channel: hub, browser: options.Browser}
+	g := &guard{token: token, origins: origins, logger: logger, channel: hub, browser: options.Browser, roots: options.Roots}
 	server := &Server{
 		token:    token,
 		listener: listener,

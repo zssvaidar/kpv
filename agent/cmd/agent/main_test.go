@@ -16,6 +16,7 @@ import (
 )
 
 func TestStartupPrintsTheURLCarryingTheToken(t *testing.T) {
+	isolateConfig(t)
 	var printed, logged bytes.Buffer
 	server, err := start(&printed, slog.New(slog.NewTextHandler(&logged, nil)))
 	if err != nil {
@@ -81,6 +82,7 @@ func TestTheStartedAgentBrowsesTheHomeDirectory(t *testing.T) {
 		"no home at all":     {filepath.Join(home, "missing"), http.StatusBadRequest, `"error":"invalid"`},
 	} {
 		t.Run(name, func(t *testing.T) {
+			isolateConfig(t)
 			t.Setenv("HOME", test.home)
 			var printed bytes.Buffer
 			server, err := start(&printed, slog.New(slog.DiscardHandler))
@@ -110,4 +112,14 @@ func TestTheStartedAgentBrowsesTheHomeDirectory(t *testing.T) {
 			}
 		})
 	}
+}
+
+// isolateConfig points the user config directory at a directory of the test's
+// own, so starting the agent never reads or writes the real store of
+// authorized roots.
+func isolateConfig(t *testing.T) string {
+	t.Helper()
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	return config
 }

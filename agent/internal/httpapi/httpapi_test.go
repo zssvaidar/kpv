@@ -124,6 +124,9 @@ type request struct {
 	// asserting about. nil adds nothing, so every case written before this
 	// field existed sends exactly what it sent before.
 	headers http.Header
+	// body, when set, is sent as the request body. "" sends none, which is
+	// what every case written before this field existed sends.
+	body string
 }
 
 func (ts *testServer) do(t *testing.T, want request) response {
@@ -141,7 +144,11 @@ func (ts *testServer) do(t *testing.T, want request) response {
 		target += "?" + url.Values{tokenParameter: []string{want.queryToken}}.Encode()
 	}
 
-	r, err := http.NewRequestWithContext(t.Context(), method, target, nil)
+	var sent io.Reader
+	if want.body != "" {
+		sent = strings.NewReader(want.body)
+	}
+	r, err := http.NewRequestWithContext(t.Context(), method, target, sent)
 	if err != nil {
 		t.Fatalf("build a %s %s request: %v", method, path, err)
 	}

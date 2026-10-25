@@ -67,6 +67,12 @@ func (p Path) usable(op string) error {
 			Message: "this path was never resolved against an authorized project directory",
 		}
 	}
+	if p.owner.revoked.Load() {
+		return &PathError{
+			Op: op, Path: p.given, Kind: KindForbidden,
+			Message: "the project directory this path belongs to is no longer authorized",
+		}
+	}
 	return nil
 }
 

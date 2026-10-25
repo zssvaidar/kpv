@@ -23,10 +23,10 @@ type route struct {
 // apiRoutes is every route the agent serves.
 //
 // None of them touches the filesystem; these two answer out of memory and out
-// of the build. The one route that reads the filesystem is the directory
-// browsing endpoint, which is not a row here (see directoriesPattern) and
-// reaches the filesystem only through the projectfs.Browser the guard
-// carries. internal/pipeline is still not wired up: its store hands back a
+// of the build. The routes that reach the filesystem are the directory
+// browsing endpoint and the project root endpoints, which are not rows here
+// (see directoriesPattern and rootsListPattern) and reach it only through the
+// projectfs.Browser and projectfs.Roots the guard carries. internal/pipeline is still not wired up: its store hands back a
 // path to open, which is the weaker route #6 documented, and #48 moves it.
 func apiRoutes() []route {
 	return []route{
@@ -53,6 +53,11 @@ func newHandler(g *guard, routes []route) http.Handler {
 	// The directory browsing endpoint is registered here for the same reason;
 	// see directoriesPattern in directories.go.
 	mux.Handle(directoriesPattern, g.directoriesRoute())
+	// The project root endpoints (#63), for the same reason again; see
+	// rootsListPattern in roots.go.
+	mux.Handle(rootsListPattern, g.rootsListRoute())
+	mux.Handle(rootsAuthorizePattern, g.rootsAuthorizeRoute())
+	mux.Handle(rootsRevokePattern, g.rootsRevokeRoute())
 	return g.wrap(mux)
 }
 
