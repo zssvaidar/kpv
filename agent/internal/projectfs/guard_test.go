@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 )
 
@@ -413,5 +415,45 @@ func TestTwoRootsDoNotLendEachOtherAuthority(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(second, "moved.txt")); !errors.Is(err, fs.ErrNotExist) {
 		t.Error("the refused rename happened anyway")
+	}
+}
+
+// A Guard is used from many goroutines at once, which is what an HTTP server
+// will do with it. Authorizing, resolving, reading and closing all happen
+// together here, under -race.
+func TestAGuardIsSafeToUseFromManyGoroutines(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	for index := range 8 {
+		f.mkdirAll("project", "many", "root-"+strconv.Itoa(index))
+		f.write(filepath.Join("project", "many", "root-"+strconv.Itoa(index), "file.txt"), "ok")
+	}
+
+	var waiting sync.WaitGroup
+	for index := range 8 {
+		waiting.Add(1)
+		go func() {
+			defer waiting.Done()
+			directory := f.in("many", "root-"+strconv.Itoa(index))
+			if _, err := f.guard.Authorize(directory); err != nil {
+				t.Errorf("authorize %s: %v", directory, err)
+			}
+			for range 50 {
+				if _, err := f.guard.ReadFile(filepath.Join(directory, "file.txt")); err != nil {
+					t.Errorf("read inside %s: %v", directory, err)
+				}
+				if _, err := f.guard.ReadFile(f.at("outside", "secret.txt")); !IsForbidden(err) {
+					t.Errorf("a path outside every root gave %v", err)
+				}
+				_ = f.guard.Roots()
+			}
+		}()
+	}
+	waiting.Wait()
+
+	// Nine roots: the fixture's, plus the eight that were authorized, and the
+	// eight are nested inside the first so the most specific one wins.
+	if roots := f.guard.Roots(); len(roots) != 9 {
+		t.Errorf("the guard holds %d roots, want 9: %v", len(roots), roots)
 	}
 }

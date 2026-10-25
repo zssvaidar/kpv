@@ -275,9 +275,17 @@ func TestRacingTheSwapNeverReadsOutsideTheRoot(t *testing.T) {
 	linkPath := f.in("dir")
 	through := f.in("dir", "ok.txt")
 
+	// The readers run until the swapper stops, and the swapper does not stop
+	// until both outcomes have been seen at least once. That is what makes
+	// this test about the invariant rather than about the scheduler: there is
+	// no sleep, no fixed number of rounds to be unlucky with, and at
+	// GOMAXPROCS=1 the swapper simply keeps going until the readers have
+	// caught the link pointing outside. The cap is only there so a genuine
+	// defect fails instead of hanging.
 	const (
-		swaps   = 300
-		readers = 4
+		leastSwaps = 200
+		mostSwaps  = 200000
+		readers    = 4
 	)
 	var (
 		inside   atomic.Int64
@@ -315,14 +323,19 @@ func TestRacingTheSwapNeverReadsOutsideTheRoot(t *testing.T) {
 	}
 
 	targets := []string{f.outside, f.in("inside")}
-	for swap := range swaps {
-		staging := fmt.Sprintf("%s.staging-%d", linkPath, swap)
-		if err := os.Symlink(targets[swap%2], staging); err != nil {
+	swaps := 0
+	for swaps < mostSwaps {
+		staging := fmt.Sprintf("%s.staging-%d", linkPath, swaps)
+		if err := os.Symlink(targets[swaps%2], staging); err != nil {
 			t.Errorf("stage a link: %v", err)
 			break
 		}
 		if err := os.Rename(staging, linkPath); err != nil {
 			t.Errorf("swap the link: %v", err)
+			break
+		}
+		swaps++
+		if swaps >= leastSwaps && inside.Load() > 0 && refusals.Load() > 0 {
 			break
 		}
 	}
@@ -332,16 +345,16 @@ func TestRacingTheSwapNeverReadsOutsideTheRoot(t *testing.T) {
 	if outside.Load() != 0 {
 		t.Fatalf("%d reads came back with the file outside the root", outside.Load())
 	}
-	// The counts below are about the test, not about the guard: if nothing
-	// succeeded and nothing was refused, the race never happened and the
+	// Both of these are about the test rather than about the guard: if
+	// nothing ever succeeded, or the swap was never caught in flight, the
 	// invariant above held vacuously.
 	if inside.Load() == 0 {
-		t.Errorf("no read ever succeeded, so this test never exercised the allowed path (refused %d, other %d)",
-			refusals.Load(), other.Load())
+		t.Errorf("after %d swaps no read ever succeeded, so this test never exercised the allowed path (refused %d, other %d)",
+			swaps, refusals.Load(), other.Load())
 	}
 	if refusals.Load() == 0 {
-		t.Errorf("no read was ever refused, so the swap was never observed in flight (succeeded %d, other %d)",
-			inside.Load(), other.Load())
+		t.Errorf("after %d swaps no read was ever refused, so the swap was never observed in flight (succeeded %d, other %d)",
+			swaps, inside.Load(), other.Load())
 	}
 	t.Logf("raced %d swaps: %d reads inside, %d refused, %d other", swaps, inside.Load(), refusals.Load(), other.Load())
 }
