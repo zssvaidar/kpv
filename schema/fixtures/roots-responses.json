@@ -1,0 +1,176 @@
+{
+  "$comment": "The one set of project root fixtures (#63). Both toolchains read this file: agent/internal/httpapi/roots_fixtures_test.go and packages/schema/src/roots-fixtures.test.ts. Never copy it per language. lists are RootList answers (GET and DELETE /api/roots), requests are RootRequest bodies (POST and DELETE), authorized are AuthorizedRoot answers (POST), errors are RootsError answers; each side checks them against the authoritative JSON Schema and against what it was generated into.",
+  "lists": {
+    "valid": [
+      {
+        "name": "available-and-unavailable",
+        "why": "An available root, and stored roots that failed the startup check, each with its reason.",
+        "body": {
+          "roots": [
+            { "path": "/home/user/code/app", "available": true },
+            {
+              "path": "/home/user/code/gone",
+              "available": false,
+              "reason": "notFound"
+            },
+            {
+              "path": "/home/user/code/moved",
+              "available": false,
+              "reason": "changed"
+            }
+          ]
+        }
+      },
+      {
+        "name": "no-roots",
+        "why": "Nothing authorized yet, which is how the agent starts the first time.",
+        "body": { "roots": [] }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-roots-property",
+        "why": "roots is required, even when it is empty.",
+        "body": {}
+      },
+      {
+        "name": "root-without-availability",
+        "why": "Every root says whether it is available.",
+        "body": { "roots": [{ "path": "/home/user/code/app" }] }
+      },
+      {
+        "name": "unknown-reason",
+        "why": "The reasons are a closed set.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": false,
+              "reason": "deleted"
+            }
+          ]
+        }
+      },
+      {
+        "name": "empty-path",
+        "why": "A root always has a path.",
+        "body": { "roots": [{ "path": "", "available": true }] }
+      },
+      {
+        "name": "extra-property",
+        "why": "Nothing else rides along with a root, such as how it was spelled.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "given": "/home/user/link"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "requests": {
+    "valid": [
+      {
+        "name": "a-path",
+        "why": "The one shape a POST or DELETE body has.",
+        "body": { "path": "/home/user/code/app" }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-path",
+        "why": "path is required.",
+        "body": {}
+      },
+      {
+        "name": "empty-path",
+        "why": "An empty path names nothing.",
+        "body": { "path": "" }
+      },
+      {
+        "name": "path-not-a-string",
+        "why": "A path is text.",
+        "body": { "path": ["/home/user/code/app"] }
+      },
+      {
+        "name": "unknown-field",
+        "why": "A request carries path and nothing else.",
+        "body": { "path": "/home/user/code/app", "recursive": true }
+      }
+    ]
+  },
+  "authorized": {
+    "valid": [
+      {
+        "name": "the-real-path",
+        "why": "POST answers the real path that was authorized.",
+        "body": { "path": "/home/user/code/app" }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-path",
+        "why": "The answer always names what was authorized.",
+        "body": {}
+      },
+      {
+        "name": "extra-property",
+        "why": "The answer is the path and nothing more.",
+        "body": { "path": "/home/user/code/app", "available": true }
+      }
+    ]
+  },
+  "errors": {
+    "valid": [
+      {
+        "name": "forbidden",
+        "why": "A path outside the home directory: a kind and a fixed sentence, and nothing about what is there.",
+        "body": {
+          "error": "forbidden",
+          "message": "only a directory inside the home directory can be a project directory"
+        }
+      },
+      {
+        "name": "too-broad",
+        "why": "The home directory, above it, or /.",
+        "body": {
+          "error": "tooBroad",
+          "message": "the home directory, the directories above it and the filesystem root are too broad to be a project directory"
+        }
+      },
+      {
+        "name": "overlaps",
+        "why": "The one error that names something: the stored root the request overlaps.",
+        "body": {
+          "error": "overlaps",
+          "message": "this directory is inside, or contains, a project directory that is already authorized",
+          "root": "/home/user/code/app"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "unknown-kind",
+        "why": "The kinds are a closed set.",
+        "body": { "error": "exists", "message": "it exists" }
+      },
+      {
+        "name": "no-message",
+        "why": "Every error has its sentence.",
+        "body": { "error": "invalid" }
+      },
+      {
+        "name": "a-resolved-path",
+        "why": "Nothing from the underlying error is ever passed on.",
+        "body": {
+          "error": "forbidden",
+          "message": "only a directory inside the home directory can be a project directory",
+          "resolved": "/etc"
+        }
+      }
+    ]
+  }
+}

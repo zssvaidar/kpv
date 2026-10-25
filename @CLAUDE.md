@@ -68,6 +68,19 @@ and `agent/internal/httpapi/models_gen.go` plus a copy of the schema there,
 with shared fixtures in `schema/fixtures/directory-responses.json`. The copy is
 read by the tests only: `httpapi` may not import `embed`.
 
+`schema/roots.schema.json` is the fourth, same rules: every request and
+response of the project root endpoints (#63), a `RootList`, a `RootRequest`,
+an `AuthorizedRoot` or a `RootsError`, generated into
+`packages/schema/src/generated/roots-*.ts` and
+`agent/internal/httpapi/roots_models_gen.go` (its own file, since `httpapi`
+already holds the directory schema's `models_gen.go`) plus a copy of the
+schema there, with shared fixtures in `schema/fixtures/roots-responses.json`.
+Two pairings are stated in words rather than in the schema, because the Zod
+generator drops `if`/`then` and the Go one turns `oneOf` into `interface{}`:
+a root has a `reason` exactly when it is unavailable, and an error names a
+`root` exactly when it is `overlaps`. Both fixture tests and every HTTP test
+answer hold them.
+
 Generated output is committed, and `pnpm generate:check` regenerates it and
 fails on any diff. That is what catches a stale schema and a hand-edited
 generated file, so never edit anything under a generated path by hand.
@@ -166,7 +179,8 @@ prints the URL to open and serves.
   capped well below `net/http`'s 1MB default
 - no route here reaches the filesystem except through `internal/projectfs`:
   nothing imports `os`, `io/fs` or `path/filepath`, and the only projectfs
-  names used are the read-only browsing ones. `internal/pipeline` is still
+  names used are the read-only browsing ones and the root authorization ones
+  (#63). `internal/pipeline` is still
   not wired up. `source_test.go` asserts both, and the two claims a response
   cannot show: the token source is `crypto/rand` and the comparison is
   `subtle.ConstantTimeCompare` over digests, which does not leak length
@@ -178,6 +192,23 @@ prints the URL to open and serves.
   read-only. An error answers a kind and a fixed sentence and nothing from the
   underlying error, because a projectfs refusal can describe what is outside
   the roots
+- `GET`, `POST` and `DELETE /api/roots` are the project root endpoints (#63),
+  registered by `newHandler` the same way and held to the same rejection
+  matrix in `roots_test.go`. `GET` lists the stored roots, each with its real
+  path and `available`; `POST {"path": "<absolute>"}` authorizes a directory
+  and answers the real path; `DELETE {"path": ...}` revokes a root and answers
+  what is left. A body is `Content-Type: application/json`, at most 4096 bytes,
+  exactly one object with `path` once and nothing else (it is read token by
+  token, because `encoding/json` keeps the last of two keys and matches keys
+  case-insensitively); anything else is `400 invalid`. #58's relaxation does
+  not reach `POST` or `DELETE`: they need an allowed `Origin`. The handler
+  reads through a `projectfs.Roots` and answers a kind and a fixed sentence,
+  plus, for `overlaps` only, the stored root it overlaps. Statuses: invalid
+  400, forbidden/tooBroad/unreadable 403, notFound 404, notDirectory/overlaps
+  409, io 500. `httpapi` may use projectfs's read-only browsing names and the
+  authorization ones (`Roots`, `RootStatus`, `OverlappedRoot`,
+  `KindTooBroad`, `KindOverlaps`) and nothing else, which
+  `TestThisPackageUsesOnlyTheReadOnlyAndAuthorizationPartsOfProjectfs` holds
 - `GET /api/channel` is the push channel (#5). It is registered by
   `newHandler`, on the same mux, inside the same wrap, rather than being a row
   in `apiRoutes()`: every row is a request-and-an-answer route and the table's
@@ -195,6 +226,60 @@ prints the URL to open and serves.
   a request carrying an `Upgrade` header: a browser sends `Origin` on a
   handshake, so the channel requires one through the allowlist like any
   state-changing route
+
+Authorized project roots
+
+`projectfs.Roots` (#63) is the user's set of project roots: which directories
+the `Guard` allows, kept in step with a file. Its `Authorize` goes through
+`Guard.Authorize` on the guard the `Browser` shares, so a root is browsable
+the moment it is authorized; its `Revoke` is `Guard.Revoke`.
+
+- a root is a directory strictly inside the home directory, readable and
+  searchable, resolved through the browser's home guard. A path outside home
+  is `forbidden` with the same answer whatever is there (an existing
+  directory, a file, nothing, an unsearchable directory, a link cycle, a link
+  out); `/`, the home directory under any spelling and anything above it are
+  `tooBroad` (an ancestor is recognised from the cleaned text, so the answer
+  depends on nothing outside home); inside home a missing path is `notFound`,
+  a file `notDirectory`, an unreadable or unsearchable directory `unreadable`.
+  Authorizing a link authorizes its real target, and the real path is what is
+  answered, listed and stored
+- a directory inside a stored root, or containing one, is `overlaps`, naming
+  that root: one file belongs to one root. The guard still supports nesting;
+  `Roots` does not use it. A directory that holds the agent's store, or is
+  inside its directory, is `forbidden`, because a project that could write the
+  store could rewrite the set of roots
+- the directory the guard opens is held to being the one that was checked
+  (`os.SameFile` against what the check saw), so a component swapped between
+  the two is refused as `changed`, not authorized
+- `Guard.Revoke` marks the root revoked and closes its descriptor, so a
+  `projectfs.Path` taken before the revoke stops working exactly as after
+  `Guard.Close`: `Path.usable` refuses it, and `os.Root`'s own reference count
+  means an operation already past that check finishes and nothing starts
+  after. Revoking deletes nothing on disk, and the directory stays browsable
+  read-only because it is under home. A path that is not a stored root is
+  `notFound`, the same answer whether or not the directory exists
+- the store is `os.UserConfigDir()/kpv/roots.json`, which on Linux is
+  `$XDG_CONFIG_HOME/kpv/roots.json` or `~/.config/kpv/roots.json`:
+  `{"version": 1, "roots": ["/real/path", ...]}`, nothing else and never the
+  token. It is written atomically (a `0600` temporary file beside it, flushed,
+  then renamed) in a `0700` directory, which is made by the first write. No
+  config directory means the roots last as long as the process
+- at startup every stored root is checked again the same way, through
+  `Guard.Authorize`. One that is now missing, not a directory, unreadable,
+  outside home, too broad, overlapping an earlier one, or resolves to a
+  different real path (`changed`) is not authorized; it is listed with
+  `available: false` and the reason, and revoking it removes it from the store.
+  `available` is that decision, made at startup or at authorization, not a
+  fresh look at the disk on every `GET`
+- a missing store is no roots. One that cannot be read, or is not exactly the
+  document above, is logged once by kind (`corrupt` or `unreadable`), the agent
+  starts with no roots, and the file is renamed to `roots.json.corrupt-<UTC
+  time>` (never over an earlier backup) before anything is written; if it
+  cannot be moved aside, nothing is written over it and an authorization
+  answers `io`. The log carries kinds, never a path
+- the tests point `HOME` and `XDG_CONFIG_HOME` at scratch directories, so no
+  test reads or writes the real store
 
 The push channel
 

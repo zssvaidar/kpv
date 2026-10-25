@@ -279,7 +279,7 @@ func (r *Roots) check(op, path string) (checkedRoot, error) {
 		return checkedRoot{}, refusal(op, path, KindForbidden, "only a directory inside the home directory can be a project directory")
 	}
 	tooBroad := func() (checkedRoot, error) {
-		return checkedRoot{}, refusal(op, path, KindTooBroad, "the home directory, the directories above it and / are too broad to be a project directory")
+		return checkedRoot{}, refusal(op, path, KindTooBroad, "the home directory, the directories above it and the filesystem root are too broad to be a project directory")
 	}
 	if r.home == nil {
 		return forbidden()

@@ -117,7 +117,7 @@ func TestAPathTakenBeforeARevokeStopsWorkingLikeAfterClose(t *testing.T) {
 func TestARootCanBeRevokedByAnySpellingThatResolvesToIt(t *testing.T) {
 	t.Parallel()
 	for name, spelling := range map[string]func(base, project string) string{
-		"its real path":   func(_, project string) string { return project },
+		"its real path":      func(_, project string) string { return project },
 		"a trailing slash":   func(_, project string) string { return project + "/" },
 		"a dot segment":      func(_, project string) string { return project + "/." },
 		"the link it was by": func(base, _ string) string { return filepath.Join(base, "link") },

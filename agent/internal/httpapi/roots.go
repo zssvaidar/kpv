@@ -53,7 +53,7 @@ var rootsFailures = map[RootsErrorKind]rootsFailure{
 	RootsErrorKindForbidden: {http.StatusForbidden,
 		"only a directory inside the home directory can be a project directory"},
 	RootsErrorKindTooBroad: {http.StatusForbidden,
-		"the home directory, the directories above it and / are too broad to be a project directory"},
+		"the home directory, the directories above it and the filesystem root are too broad to be a project directory"},
 	RootsErrorKindNotFound: {http.StatusNotFound,
 		"this directory does not exist"},
 	RootsErrorKindNotDirectory: {http.StatusConflict,

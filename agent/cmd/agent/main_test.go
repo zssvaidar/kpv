@@ -123,3 +123,91 @@ func isolateConfig(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", config)
 	return config
 }
+
+// The authorized roots are kept in kpv/roots.json under the user config
+// directory, and a restarted agent lists and browses them again.
+func TestTheStartedAgentKeepsItsAuthorizedRootsAcrossARestart(t *testing.T) {
+	config := isolateConfig(t)
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temporary directory: %v", err)
+	}
+	home := filepath.Join(base, "home")
+	project := filepath.Join(home, "code", "app")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatalf("make the project: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	call := func(server interface {
+		URL() string
+	}, token, method, path, body string) (int, string) {
+		t.Helper()
+		var sent io.Reader
+		if body != "" {
+			sent = strings.NewReader(body)
+		}
+		request, err := http.NewRequestWithContext(t.Context(), method, server.URL()+path, sent)
+		if err != nil {
+			t.Fatalf("build the request: %v", err)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Origin", server.URL())
+		if body != "" {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		answer, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		defer func() { _ = answer.Body.Close() }()
+		read, err := io.ReadAll(answer.Body)
+		if err != nil {
+			t.Fatalf("read the answer: %v", err)
+		}
+		return answer.StatusCode, string(read)
+	}
+	startAgent := func() (*bytes.Buffer, func(method, path, body string) (int, string), func()) {
+		var printed, logged bytes.Buffer
+		server, err := start(&printed, slog.New(slog.NewTextHandler(&logged, nil)))
+		if err != nil {
+			t.Fatalf("start the agent: %v", err)
+		}
+		go func() { _ = server.Serve() }()
+		secret := server.Token().Secret()
+		return &logged, func(method, path, body string) (int, string) {
+			return call(server, secret, method, path, body)
+		}, func() { _ = server.Close() }
+	}
+
+	logged, do, stop := startAgent()
+	status, body := do(http.MethodPost, "/api/roots", `{"path":`+strconv.Quote(project)+`}`)
+	if status != http.StatusOK || body != `{"path":`+strconv.Quote(project)+"}\n" {
+		t.Fatalf("authorize answered %d %s", status, body)
+	}
+	firstLog := logged.String()
+	stop()
+
+	store := filepath.Join(config, "kpv", "roots.json")
+	info, err := os.Stat(store)
+	if err != nil {
+		t.Fatalf("the store is not where it is documented: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("the store has mode %o", info.Mode().Perm())
+	}
+	if strings.Contains(firstLog, project) {
+		t.Fatalf("the log names the root:\n%s", firstLog)
+	}
+
+	_, do, stop = startAgent()
+	defer stop()
+	status, body = do(http.MethodGet, "/api/roots", "")
+	if status != http.StatusOK || body != `{"roots":[{"available":true,"path":`+strconv.Quote(project)+"}]}\n" {
+		t.Fatalf("after the restart, the roots are %d %s", status, body)
+	}
+	status, body = do(http.MethodGet, "/api/directories?path="+url.QueryEscape(project), "")
+	if status != http.StatusOK || !strings.Contains(body, `"path":`+strconv.Quote(project)) {
+		t.Fatalf("after the restart, the root browses as %d %s", status, body)
+	}
+}

@@ -234,7 +234,7 @@ func TestTheHomeDirectoryAndEverythingAboveItIsTooBroad(t *testing.T) {
 	} {
 		_, err := f.roots.Authorize(path)
 		fault := refusedAs(t, err, KindTooBroad, path)
-		if fault.Message != "the home directory, the directories above it and / are too broad to be a project directory" {
+		if fault.Message != "the home directory, the directories above it and the filesystem root are too broad to be a project directory" {
 			t.Errorf("%s: message %q", path, fault.Message)
 		}
 	}
