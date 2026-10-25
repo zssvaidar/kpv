@@ -329,6 +329,14 @@ const defaultFileMode fs.FileMode = 0o644
 // An existing regular file keeps the mode it already has; a new one gets perm.
 // emit is a function rather than a byte slice so that a caller can stream, and
 // so a test can fail in the middle of a real write.
+//
+// One consequence is worth stating because it looks like an exception and is
+// not: a rename replaces a name, it does not follow a symbolic link sitting
+// under that name. So if someone has put a link to a file outside the root
+// where the destination should be, this does not write through it -- it
+// replaces it with the new file, inside the root, under the name that was
+// authorized. Writing through such a link is what WriteFile would attempt, and
+// the root's descriptor refuses that.
 func (p Path) WriteAtomically(perm fs.FileMode, emit func(io.Writer) error) error {
 	if err := p.usable("write"); err != nil {
 		return err
