@@ -3,7 +3,11 @@
   "compilerOptions": {
     "types": ["node"],
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@kpv/schema": ["../schema/src/index.ts"]
+    }
   },
   "include": ["dev/**/*.ts", "vite.config.ts"]
 }
