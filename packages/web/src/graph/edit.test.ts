@@ -14,7 +14,9 @@ import {
   insertStep,
   moveStep,
   newStepId,
+  schemaIssues,
   stepTypes,
+  updateKafkaBlock,
 } from './edit.ts';
 import dragSource from './drag.ts?raw';
 import editSource from './edit.ts?raw';
@@ -463,6 +465,53 @@ describe('every operation', () => {
       (plain.processingSteps?.[0]?.configuration as { keepOnMatch?: boolean })
         .keepOnMatch,
     ).toBeUndefined();
+  });
+});
+
+describe('updateKafkaBlock', () => {
+  it('replaces the source or the destination and nothing else', () => {
+    const pipeline = everyType();
+    const source = updateKafkaBlock(pipeline, {
+      ...pipeline.source,
+      topic: 'orders.v2',
+    });
+    expect(source.ok).toBe(true);
+    expect(source.pipeline.source.topic).toBe('orders.v2');
+    expect(source.pipeline.destination).toBe(pipeline.destination);
+    expect(source.pipeline.processingSteps).toBe(pipeline.processingSteps);
+
+    const destination = updateKafkaBlock(pipeline, {
+      ...pipeline.destination,
+      acks: '1',
+    });
+    expect(destination.ok).toBe(true);
+    expect(destination.pipeline.destination.acks).toBe('1');
+    expect(destination.pipeline.source).toBe(pipeline.source);
+  });
+
+  it('is validated like every other edit: a block the schema refuses changes nothing', () => {
+    const pipeline = everyType();
+    const result = updateKafkaBlock(pipeline, {
+      ...pipeline.source,
+      topic: 'not a topic',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.pipeline).toBe(pipeline);
+    if (!result.ok) expect(result.reason).toContain('source.topic');
+  });
+});
+
+describe('schemaIssues', () => {
+  it('is empty for a valid pipeline and lists every issue of an invalid one', () => {
+    const pipeline = everyType();
+    expect(schemaIssues(pipeline)).toEqual([]);
+    const issues = schemaIssues({
+      ...pipeline,
+      source: { ...pipeline.source, topic: '', consumerGroupId: '' },
+    });
+    expect(issues.map((issue) => issue.path.join('.'))).toEqual(
+      expect.arrayContaining(['source.topic', 'source.consumerGroupId']),
+    );
   });
 });
 

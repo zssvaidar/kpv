@@ -17,6 +17,8 @@
 import type {
   CustomCodeStep,
   FilterStep,
+  KafkaDestinationBlock,
+  KafkaSourceBlock,
   Pipeline,
   ProcessingStep,
   TransformStep,
@@ -136,15 +138,41 @@ const reject = (pipeline: Pipeline, reason: string): EditResult => ({
  * The new pipeline, if the schema accepts it; otherwise a rejection that
  * hands back the previous one. Every operation ends here.
  */
+/** One way a pipeline fails the schema: where, and what the schema said. */
+export interface SchemaIssue {
+  path: readonly PropertyKey[];
+  message: string;
+  code: string;
+  /** The issue as Zod reported it, for a caller that words it itself. */
+  detail: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Every way this pipeline fails the generated Zod schema in @kpv/schema with
+ * its annotation rules, in the order Zod reports them. Empty when it passes.
+ * The one check behind commit, so a form that validates as the user types
+ * (panel/kafka-form.ts) applies exactly the rules a save will.
+ */
+export function schemaIssues(pipeline: Pipeline): SchemaIssue[] {
+  const parsed = pipelineZodSchema.safeParse(pipeline);
+  if (parsed.success) return [];
+  return parsed.error.issues.map((issue) => ({
+    path: issue.path,
+    message: issue.message,
+    code: issue.code,
+    detail: issue as unknown as Readonly<Record<string, unknown>>,
+  }));
+}
+
 export function commit(
   previous: Pipeline,
   next: Pipeline,
   stepId?: string,
 ): EditResult {
-  const parsed = pipelineZodSchema.safeParse(next);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    const where = first === undefined ? '' : first.path.join('.');
+  const issues = schemaIssues(next);
+  if (issues.length > 0) {
+    const first = issues[0];
+    const where = first === undefined ? '' : first.path.map(String).join('.');
     return reject(
       previous,
       `The result would not be a valid pipeline${
@@ -256,4 +284,26 @@ export function deleteStep(pipeline: Pipeline, ref: BlockRef): EditResult {
   if (index === null) return reject(pipeline, `There is no ${describe(ref)}.`);
   const next = steps(pipeline).filter((_, i) => i !== index - 1);
   return commit(pipeline, withSteps(pipeline, next));
+}
+
+/** The pipeline with this block as its source or destination, unchecked. */
+export function withKafkaBlock(
+  pipeline: Pipeline,
+  block: KafkaSourceBlock | KafkaDestinationBlock,
+): Pipeline {
+  return block.type === 'kafkaSource'
+    ? { ...pipeline, source: block }
+    : { ...pipeline, destination: block };
+}
+
+/**
+ * Replaces the source or the destination with this block, which is how the
+ * Kafka configuration panel (#12) saves: through commit, like every other
+ * edit, so a block the schema refuses leaves the pipeline as it was.
+ */
+export function updateKafkaBlock(
+  pipeline: Pipeline,
+  block: KafkaSourceBlock | KafkaDestinationBlock,
+): EditResult {
+  return commit(pipeline, withKafkaBlock(pipeline, block));
 }

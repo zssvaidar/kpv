@@ -259,3 +259,90 @@ body,
 .picker-keys {
   font-size: 0.8rem;
 }
+
+/* The Kafka source and destination form (#12). Layout and system colours
+   only; shared form primitives and tokens are #53. An error is said in words
+   next to its field, so the border is never the only sign of it. */
+
+.kafka-form {
+  margin: 1rem 0;
+}
+
+.kafka-form h2 code {
+  font-weight: normal;
+}
+
+.kafka-form h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+.form-field {
+  margin: 0.75rem 0;
+}
+
+.form-field label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.form-field input,
+.form-field select {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+}
+
+.form-field input {
+  font-family: monospace;
+}
+
+.form-field [aria-invalid='true'] {
+  outline: 2px solid red;
+  outline-offset: 0;
+}
+
+.field-error {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.field-error::before {
+  content: 'Error: ';
+}
+
+.field-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.kafka-connection {
+  margin: 0.75rem 0;
+  padding: 0.5rem;
+  border: 1px dashed GrayText;
+  font-size: 0.9rem;
+}
+
+.kafka-connection p {
+  margin: 0.25rem 0;
+}
+
+.form-errors,
+.form-status {
+  font-size: 0.9rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.unsaved-elsewhere {
+  margin: 0.5rem 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px dashed GrayText;
+  font-size: 0.9rem;
+}
