@@ -4,11 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { Shell } from '../shell/App.tsx';
 import { graphFixtures } from './fixtures.ts';
-import {
-  PipelineGraph,
-  readOnlyProps,
-  selectionAfter,
-} from './PipelineGraph.tsx';
+import { EditControls } from './EditControls.tsx';
+import { editProps, PipelineGraph, selectionAfter } from './PipelineGraph.tsx';
 import { SelectionSummary } from './SelectionSummary.tsx';
 
 const select = (id: string, selected: boolean): NodeChange => ({
@@ -23,6 +20,7 @@ const render = (selected: string | null) =>
       pipeline={graphFixtures['every-block-type']}
       selected={selected}
       onSelect={() => undefined}
+      onEdit={() => undefined}
     />,
   );
 
@@ -68,19 +66,29 @@ describe('PipelineGraph', () => {
     expect(selected).toEqual(['step:require-amount']);
   });
 
-  it('is read-only: nothing drags, connects, reconnects or deletes', () => {
-    expect(readOnlyProps).toMatchObject({
-      nodesDraggable: false,
+  it('lets processing steps be dragged and deleted, and nothing be connected', () => {
+    expect(editProps).toMatchObject({
+      nodesDraggable: true,
       nodesConnectable: false,
       edgesReconnectable: false,
-      deleteKeyCode: null,
+      deleteKeyCode: ['Delete', 'Backspace'],
       connectOnClick: false,
     });
     const html = render(null);
-    expect(html).not.toMatch(/react-flow__node[^"]*\bdraggable\b/);
+    // Each step is draggable; the source and the destination are not.
+    const draggable = [
+      ...html.matchAll(
+        /class="react-flow__node[^"]*\bdraggable\b[^"]*"[^>]*data-id="([^"]+)"/g,
+      ),
+    ].map((match) => match[1]);
+    expect(draggable).toEqual([
+      'step:only-paid',
+      'step:to-billing-shape',
+      'step:require-amount',
+      'step:apply-discounts',
+    ]);
     expect(html).not.toMatch(/react-flow__handle[^"]*\bconnectable/);
-    // Fit, zoom in and zoom out; no interactivity toggle that would unlock
-    // dragging.
+    // Fit, zoom in and zoom out; no interactivity toggle.
     expect(html).toContain('react-flow__controls-fitview');
     expect(html).toContain('react-flow__controls-zoomin');
     expect(html).toContain('react-flow__controls-zoomout');
@@ -151,11 +159,67 @@ describe('the selection in the side panel', () => {
     expect(html).not.toContain('No pipeline open.');
   });
 
+  it('offers no editing controls until a block is selected', () => {
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipeline={graphFixtures['every-block-type']}
+      />,
+    );
+    expect(html).not.toContain('edit-controls');
+  });
+
   it('is not drawn without a pipeline', () => {
     const html = renderToStaticMarkup(
       <Shell state={{ status: 'connected' }} client={null} />,
     );
     expect(html).toContain('No pipeline open.');
     expect(html).not.toContain('data-selected');
+  });
+});
+
+describe('the editing controls in the side panel', () => {
+  const controls = (selected: string | null) =>
+    renderToStaticMarkup(
+      <EditControls
+        pipeline={graphFixtures['every-block-type']}
+        selected={selected}
+        onEdit={() => undefined}
+      />,
+    );
+  const inserts = (html: string) =>
+    [...html.matchAll(/data-insert="([^"]+)"/g)].map((match) => match[1]);
+
+  it('offers inserting every step type after a step, and moving and deleting it', () => {
+    const html = controls('step:to-billing-shape');
+    expect(inserts(html)).toEqual([
+      'filter',
+      'transform',
+      'validate',
+      'customCode',
+    ]);
+    expect(html).toContain('Move earlier');
+    expect(html).toContain('Move later');
+    expect(html).toContain('Delete step');
+    expect(html).not.toMatch(/disabled=""[^>]*>Move/);
+  });
+
+  it('cannot move the first step earlier or the last step later', () => {
+    expect(controls('step:only-paid')).toMatch(/disabled=""[^>]*>Move earlier/);
+    expect(controls('step:apply-discounts')).toMatch(
+      /disabled=""[^>]*>Move later/,
+    );
+  });
+
+  it('offers only inserting after the source, and nothing for the destination', () => {
+    const atSource = controls('source');
+    expect(inserts(atSource)).toHaveLength(4);
+    expect(atSource).not.toContain('Delete step');
+    expect(atSource).not.toContain('Move');
+    expect(controls('destination')).toBe(
+      '<div class="edit-controls" aria-label="Edit the pipeline"></div>',
+    );
+    expect(controls(null)).toBe('');
   });
 });

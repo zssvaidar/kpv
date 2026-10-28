@@ -15,3 +15,27 @@
 .block-handle {
   visibility: hidden;
 }
+
+/* A processing step can be dragged along the row (#11). */
+.react-flow__node.draggable {
+  cursor: grab;
+}
+
+.react-flow__node.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+
+/* The side panel's editing controls and the reason an edit was refused. */
+.edit-controls fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 0.75rem;
+  border: 1px solid GrayText;
+}
+
+.edit-notice {
+  border-left: 3px solid CanvasText;
+  padding-left: 0.5rem;
+}

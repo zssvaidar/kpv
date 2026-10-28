@@ -19,11 +19,12 @@ import type {
   ProcessingStep,
 } from '@kpv/schema';
 
-/** The size of every node, in graph units. */
-export const nodeWidth = 180;
-export const nodeHeight = 56;
-/** The horizontal space between one node and the next. */
-export const nodeGap = 60;
+import type { BlockRef } from './edit.ts';
+import { nodeHeight, nodeWidth, xAtChainIndex } from './geometry.ts';
+
+// The measurements live in geometry.ts, which the editing code can import
+// without React Flow; they are re-exported here, where the layout uses them.
+export { nodeGap, nodeHeight, nodeWidth } from './geometry.ts';
 
 /** Where a block sits in the pipeline. */
 export type BlockRole = 'source' | 'step' | 'destination';
@@ -49,6 +50,12 @@ export type BlockNode = Node<BlockNodeData, 'block'>;
  */
 export const nodeId = (placed: PlacedBlock): string =>
   placed.role === 'step' ? `step:${placed.block.id}` : placed.role;
+
+/** The block a placed block is, as the editing operations (edit.ts) name it. */
+export const blockRef = (placed: PlacedBlock): BlockRef =>
+  placed.role === 'step'
+    ? { role: 'step', id: placed.block.id }
+    : { role: placed.role };
 
 /** Every block of a pipeline, in pipeline order. */
 export function placedBlocks(pipeline: Pipeline): PlacedBlock[] {
@@ -86,9 +93,13 @@ export function layoutPipeline(pipeline: Pipeline): {
   const nodes = blocks.map((placed): BlockNode => ({
     id: nodeId(placed),
     type: 'block',
-    position: { x: placed.index * (nodeWidth + nodeGap), y: 0 },
+    position: { x: xAtChainIndex(placed.index), y: 0 },
     width: nodeWidth,
     height: nodeHeight,
+    // Only a processing step can be dragged to another place or deleted;
+    // the source stays first and the destination last (#11).
+    draggable: placed.role === 'step',
+    deletable: placed.role === 'step',
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
     data: { ...placed },
