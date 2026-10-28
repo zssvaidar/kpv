@@ -15,6 +15,7 @@ import type { ChangeEvent } from 'react';
 import type { Pipeline } from '@kpv/schema';
 
 import { blockKindLabel } from '../blocks/BlockNode.tsx';
+import { blockForNode } from '../graph/layout.ts';
 import type { KafkaDraft, KafkaField, KafkaRole } from './kafka-form.ts';
 import {
   checkDraft,
@@ -225,22 +226,34 @@ export function KafkaBlockForm(props: {
 }
 
 /**
- * Says which Kafka blocks hold unsaved changes when another block is
- * selected, so moving away from a form never hides that it was left dirty.
+ * Says which blocks hold unsaved changes when another block is selected, so
+ * moving away from a form never hides that it was left dirty: a Kafka block
+ * here (#12), or a filter, transform or validate step (#13).
  */
 export function UnsavedElsewhere(props: {
   pipeline: Pipeline;
-  roles: readonly KafkaRole[];
-  onShow: (role: KafkaRole) => void;
+  /** The node ids of those blocks, as layout.ts names them. */
+  nodes: readonly string[];
+  onShow: (node: string) => void;
 }) {
-  if (props.roles.length === 0) return null;
+  const shown = props.nodes.flatMap((node) => {
+    const placed = blockForNode(props.pipeline, node);
+    return placed === null ? [] : [{ node, placed }];
+  });
+  if (shown.length === 0) return null;
   return (
     <div className="unsaved-elsewhere" role="status">
-      {props.roles.map((role) => (
-        <p key={role} data-unsaved={role}>
-          The {blockKindLabel[kafkaBlock(props.pipeline, role).type]} has
-          unsaved changes, kept until you save or discard them.{' '}
-          <button type="button" onClick={() => props.onShow(role)}>
+      {shown.map(({ node, placed }) => (
+        <p key={node} data-unsaved={node}>
+          The {blockKindLabel[placed.block.type]}
+          {placed.role === 'step' ? (
+            <>
+              {' '}
+              step <code>{placed.block.id}</code>
+            </>
+          ) : null}{' '}
+          has unsaved changes, kept until you save or discard them.{' '}
+          <button type="button" onClick={() => props.onShow(node)}>
             Show
           </button>
         </p>

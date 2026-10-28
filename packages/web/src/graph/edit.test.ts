@@ -17,6 +17,8 @@ import {
   schemaIssues,
   stepTypes,
   updateKafkaBlock,
+  updateStep,
+  withStep,
 } from './edit.ts';
 import dragSource from './drag.ts?raw';
 import editSource from './edit.ts?raw';
@@ -498,6 +500,76 @@ describe('updateKafkaBlock', () => {
     expect(result.ok).toBe(false);
     expect(result.pipeline).toBe(pipeline);
     if (!result.ok) expect(result.reason).toContain('source.topic');
+  });
+});
+
+describe('updateStep', () => {
+  it('replaces the step with that id and nothing else', () => {
+    const pipeline = everyType();
+    const [filter, transform] = pipeline.processingSteps ?? [];
+    if (filter?.type !== 'filter') throw new Error('fixture changed');
+    const result = updateStep(pipeline, {
+      ...filter,
+      configuration: { expression: "status == 'void'", keepOnMatch: false },
+    });
+    const next = accepted(result);
+    expect(next.processingSteps?.[0]).toEqual({
+      ...filter,
+      configuration: { expression: "status == 'void'", keepOnMatch: false },
+    });
+    expect(next.processingSteps?.[1]).toBe(transform);
+    expect(next.source).toBe(pipeline.source);
+    expect(stepIds(next)).toEqual(stepIds(pipeline));
+  });
+
+  it('is validated like every other edit: a configuration the schema refuses changes nothing', () => {
+    const pipeline = everyType();
+    const [, transform] = pipeline.processingSteps ?? [];
+    if (transform?.type !== 'transform') throw new Error('fixture changed');
+    const result = updateStep(pipeline, {
+      ...transform,
+      configuration: {
+        ...transform.configuration,
+        mappings: [] as unknown as typeof transform.configuration.mappings,
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.pipeline).toBe(pipeline);
+    if (!result.ok) {
+      expect(result.reason).toContain(
+        'processingSteps.1.configuration.mappings',
+      );
+    }
+  });
+
+  it('refuses a step the pipeline does not have, or one that changes type', () => {
+    const pipeline = everyType();
+    const missing = updateStep(pipeline, {
+      id: 'nope',
+      type: 'filter',
+      configuration: { expression: 'true' },
+    });
+    expect(missing.ok).toBe(false);
+    expect(missing.pipeline).toBe(pipeline);
+
+    const retyped = updateStep(pipeline, {
+      id: 'only-paid',
+      type: 'validate',
+      configuration: { rules: [{ field: 'x' }], onInvalid: 'drop' },
+    });
+    expect(retyped.ok).toBe(false);
+    expect(retyped.pipeline).toBe(pipeline);
+    if (!retyped.ok) expect(retyped.reason).toContain('type does not change');
+  });
+
+  it('withStep is null for a step the pipeline does not have', () => {
+    expect(
+      withStep(everyType(), {
+        id: 'nope',
+        type: 'filter',
+        configuration: { expression: 'true' },
+      }),
+    ).toBeNull();
   });
 });
 

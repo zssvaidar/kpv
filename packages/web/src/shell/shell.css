@@ -346,3 +346,52 @@ body,
   border: 1px dashed GrayText;
   font-size: 0.9rem;
 }
+
+/* The filter, transform and validate forms (#13), laid out like the Kafka
+   form, with their summary above the fields and one bordered row per mapping
+   or rule. Shared form primitives and tokens are #53. */
+
+.step-form {
+  margin: 1rem 0;
+}
+
+.step-form h2 code {
+  font-weight: normal;
+}
+
+.step-summary {
+  margin: 0.75rem 0;
+  padding: 0.5rem;
+  border-left: 3px solid GrayText;
+  font-size: 0.9rem;
+}
+
+.step-summary h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+.step-summary p {
+  margin: 0.25rem 0;
+}
+
+.form-rows {
+  margin: 0.75rem 0;
+  padding: 0.5rem;
+  border: 1px solid GrayText;
+}
+
+.form-rows legend {
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.form-row {
+  margin: 0.5rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed GrayText;
+}
+
+.form-row .form-field {
+  margin: 0.25rem 0;
+}

@@ -307,3 +307,43 @@ export function updateKafkaBlock(
 ): EditResult {
   return commit(pipeline, withKafkaBlock(pipeline, block));
 }
+
+/**
+ * The pipeline with this processing step in place of the step with its id,
+ * unchecked. `null` when the pipeline has no step with that id.
+ */
+export function withStep(
+  pipeline: Pipeline,
+  step: ProcessingStep,
+): Pipeline | null {
+  const index = steps(pipeline).findIndex((each) => each.id === step.id);
+  if (index === -1) return null;
+  const next = [...steps(pipeline)];
+  next[index] = step;
+  return withSteps(pipeline, next);
+}
+
+/**
+ * Replaces a processing step with this one, found by its id, which is how
+ * the filter, transform and validate panels (#13) save: through commit, like
+ * every other edit, so a configuration the schema refuses leaves the
+ * pipeline as it was. A step keeps its type: changing it would be a
+ * different block, which is a delete and an insert.
+ */
+export function updateStep(
+  pipeline: Pipeline,
+  step: ProcessingStep,
+): EditResult {
+  const ref: BlockRef = { role: 'step', id: step.id };
+  const current = steps(pipeline).find((each) => each.id === step.id);
+  if (current === undefined) {
+    return reject(pipeline, `There is no ${describe(ref)}.`);
+  }
+  if (current.type !== step.type) {
+    return reject(
+      pipeline,
+      `${describe(ref)} is a ${current.type} step and stays one: a step's type does not change.`,
+    );
+  }
+  return commit(pipeline, withStep(pipeline, step) ?? pipeline);
+}

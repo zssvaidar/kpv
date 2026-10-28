@@ -2,11 +2,12 @@
 // fills in -- the graph area (#9), the side panel (#12, #13) and the bottom
 // panel. When it is handed a pipeline the graph area draws it (#9) and the
 // side panel shows which block is selected in it, with the controls to edit
-// the chain (#11), and for the Kafka source or destination, the form that
-// configures it (#12); nothing opens one yet. Edits are kept here, in memory,
-// as the pipeline the graph draws; saving them is #3. So is what was typed
-// into a Kafka form and not yet saved into that pipeline, per block, so
-// selecting another block keeps it.
+// the chain (#11), and the form that configures it: for the Kafka source or
+// destination (#12), and for a filter, transform or validate step (#13);
+// nothing opens one yet. Edits are kept here, in memory, as the pipeline the
+// graph draws; saving them is #3. So is what was typed into a form and not
+// yet saved into that pipeline, per block, so selecting another block keeps
+// it.
 //
 // The connection state is in the status bar on every screen, and when there
 // is no working connection the graph area says why in words, so a dead or
@@ -24,22 +25,38 @@ import type {
 } from '../connection/monitor.ts';
 import type { EditResult } from '../graph/edit.ts';
 import { EditControls } from '../graph/EditControls.tsx';
-import { blockForNode } from '../graph/layout.ts';
+import { blockForNode, nodeId, placedBlocks } from '../graph/layout.ts';
 import { PipelineGraph } from '../graph/PipelineGraph.tsx';
 import { SelectionSummary } from '../graph/SelectionSummary.tsx';
 import type { KafkaDraft, KafkaRole } from '../panel/kafka-form.ts';
 import { saveDraft } from '../panel/kafka-form.ts';
 import { KafkaBlockForm, UnsavedElsewhere } from '../panel/KafkaBlockForm.tsx';
+import type { StepDraft } from '../panel/step-form.ts';
+import { saveStepDraft, stepFor } from '../panel/step-form.ts';
+import { StepBlockForm } from '../panel/StepBlockForm.tsx';
 import { DirectoryPicker } from '../picker/DirectoryPicker.tsx';
 
-/** What the Kafka forms hold that the pipeline does not, by block. */
-type Drafts = Partial<Record<KafkaRole, KafkaDraft>>;
+/**
+ * What the configuration forms hold that the pipeline does not, by the node
+ * id of the block it is for: 'source', 'destination' or 'step:<id>'.
+ */
+type Drafts = Partial<Record<string, KafkaDraft | StepDraft>>;
 
-const withoutDraft = (drafts: Drafts, role: KafkaRole): Drafts => {
+const withoutDraft = (drafts: Drafts, node: string): Drafts => {
   const next = { ...drafts };
-  delete next[role];
+  delete next[node];
   return next;
 };
+
+/** The drafts whose block is still in the pipeline: a deleted step's go. */
+const keptDrafts = (pipeline: Pipeline, drafts: Drafts): Drafts =>
+  Object.fromEntries(
+    Object.entries(drafts).filter(
+      ([node]) => blockForNode(pipeline, node) !== null,
+    ),
+  );
+
+const stepNode = (id: string): string => `step:${id}`;
 
 export function App(props: {
   client: AgentClient | null;
@@ -97,7 +114,13 @@ export function Shell(props: {
         : blockForNode(result.pipeline, current.node) === null
           ? null
           : current.node;
-    setEdits({ ...current, pipeline: result.pipeline, node, notice: null });
+    setEdits({
+      ...current,
+      pipeline: result.pipeline,
+      node,
+      notice: null,
+      drafts: keptDrafts(result.pipeline, current.drafts),
+    });
   };
   const onDraft = (role: KafkaRole, draft: KafkaDraft | null) => {
     if (current === null) return;
@@ -123,12 +146,56 @@ export function Shell(props: {
       drafts: withoutDraft(current.drafts, draft.role),
     });
   };
+  const onStepDraft = (id: string, draft: StepDraft | null) => {
+    if (current === null) return;
+    const drafts =
+      draft === null
+        ? withoutDraft(current.drafts, stepNode(id))
+        : { ...current.drafts, [stepNode(id)]: draft };
+    setEdits({ ...current, drafts });
+  };
+  const onStepSave = (draft: StepDraft) => {
+    if (current === null) return;
+    const result = saveStepDraft(current.pipeline, draft);
+    if (!result.ok) {
+      setEdits({ ...current, notice: result.reason });
+      return;
+    }
+    setEdits({
+      ...current,
+      pipeline: result.pipeline,
+      notice: null,
+      drafts: withoutDraft(current.drafts, stepNode(draft.id)),
+    });
+  };
   // The Kafka block the selection is, if it is one.
   const kafkaRole: KafkaRole | null =
     selected === 'source' || selected === 'destination' ? selected : null;
-  const unsavedElsewhere = (['source', 'destination'] as const).filter(
-    (role) => role !== kafkaRole && current?.drafts[role] !== undefined,
-  );
+  const kafkaDraft = (role: KafkaRole): KafkaDraft | null => {
+    const draft = current?.drafts[role];
+    return draft !== undefined && 'role' in draft ? draft : null;
+  };
+  // The filter, transform or validate step the selection is, if it is one.
+  const placed = pipeline === null ? null : blockForNode(pipeline, selected);
+  const stepId =
+    placed?.role === 'step' &&
+    pipeline !== null &&
+    stepFor(pipeline, placed.block.id) !== null
+      ? placed.block.id
+      : null;
+  const stepDraft = (id: string): StepDraft | null => {
+    const draft = current?.drafts[stepNode(id)];
+    return draft !== undefined && 'type' in draft ? draft : null;
+  };
+  // Every other block with unsaved input, in pipeline order.
+  const unsavedElsewhere =
+    pipeline === null
+      ? []
+      : placedBlocks(pipeline)
+          .map(nodeId)
+          .filter(
+            (node) => node !== selected && current?.drafts[node] !== undefined,
+          );
   const description = describeConnection(state);
   const connected = state.status === 'connected';
   return (
@@ -188,14 +255,24 @@ export function Shell(props: {
                 key={kafkaRole}
                 pipeline={pipeline}
                 role={kafkaRole}
-                draft={current.drafts[kafkaRole] ?? null}
+                draft={kafkaDraft(kafkaRole)}
                 onDraft={onDraft}
                 onSave={onSave}
               />
             ) : null}
+            {connected && stepId !== null && current !== null ? (
+              <StepBlockForm
+                key={stepNode(stepId)}
+                pipeline={pipeline}
+                stepId={stepId}
+                draft={stepDraft(stepId)}
+                onDraft={onStepDraft}
+                onSave={onStepSave}
+              />
+            ) : null}
             <UnsavedElsewhere
               pipeline={pipeline}
-              roles={unsavedElsewhere}
+              nodes={unsavedElsewhere}
               onShow={onSelect}
             />
           </>

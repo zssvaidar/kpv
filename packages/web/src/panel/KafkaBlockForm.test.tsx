@@ -118,7 +118,7 @@ describe('UnsavedElsewhere', () => {
     const html = renderToStaticMarkup(
       <UnsavedElsewhere
         pipeline={everyType()}
-        roles={['destination']}
+        nodes={['destination']}
         onShow={() => undefined}
       />,
     );
@@ -126,12 +126,26 @@ describe('UnsavedElsewhere', () => {
     expect(html).toContain('The Kafka destination has unsaved changes');
   });
 
+  it('names a processing step left with unsaved changes, by its id', () => {
+    const html = renderToStaticMarkup(
+      <UnsavedElsewhere
+        pipeline={everyType()}
+        nodes={['step:only-paid', 'step:gone']}
+        onShow={() => undefined}
+      />,
+    );
+    expect(html).toContain('data-unsaved="step:only-paid"');
+    expect(html).toContain('The Filter step <code>only-paid</code>');
+    // A block no longer in the pipeline has nothing to show.
+    expect(html).not.toContain('step:gone');
+  });
+
   it('says nothing when there are none', () => {
     expect(
       renderToStaticMarkup(
         <UnsavedElsewhere
           pipeline={everyType()}
-          roles={[]}
+          nodes={[]}
           onShow={() => undefined}
         />,
       ),
