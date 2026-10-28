@@ -15,7 +15,9 @@ import (
 type RootStatus struct {
 	// Path is the real path the root was authorized as.
 	Path string
-	// Available says the root is authorized in the Guard right now.
+	// Available says the root is authorized in the Guard right now, and that
+	// it was still the directory the user authorized when it was last asked
+	// about.
 	Available bool
 	// Reason is why a stored root is not available, and "" when it is. It is
 	// one of KindNotFound, KindNotDirectory, KindUnreadable, KindForbidden,
@@ -42,6 +44,14 @@ type RootStatus struct {
 // It exposes no operation that reads or writes a file under a root, and no
 // Guard or Path: what it hands back is RootStatus and strings. It is safe for
 // concurrent use, and one change is made at a time, store write included.
+//
+// Whether an available root is still the directory the user authorized is
+// asked again whenever something asks about it (#67): List, Authorize, and
+// every browse that lands in it. One that is gone, or is now another
+// directory, is released from the Guard at once and listed as unavailable
+// with the reason. It stays stored, in its place, until it is revoked, and it
+// becomes available again only by being authorized again, or at the next
+// startup.
 type Roots struct {
 	mutex      sync.Mutex
 	authorized *Guard
@@ -70,6 +80,7 @@ func OpenRoots(browser *Browser, storeFile string, logger *slog.Logger) (*Roots,
 		logger = slog.New(slog.DiscardHandler)
 	}
 	roots := &Roots{authorized: browser.authorized, home: browser.home, logger: logger}
+	defer browser.roots.Store(roots)
 	if storeFile == "" {
 		return roots, nil
 	}
@@ -91,10 +102,13 @@ func OpenRoots(browser *Browser, storeFile string, logger *slog.Logger) (*Roots,
 	return roots, nil
 }
 
-// List returns every stored root, in the order they were authorized.
+// List returns every stored root, in the order they were authorized. Each
+// available root is checked first, so one that is gone is listed as
+// unavailable.
 func (r *Roots) List() []RootStatus {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	r.confirmAllLocked()
 	return r.listLocked()
 }
 
@@ -104,7 +118,9 @@ func (r *Roots) listLocked() []RootStatus {
 
 // Authorize makes the directory at path a project root and returns the real
 // path it was authorized as. Authorizing a root that already is, under any
-// spelling, returns it and changes nothing.
+// spelling, returns it and changes nothing, once it has been checked to still
+// be the directory that was authorized. A stored root that is unavailable is
+// authorized again as the directory there now, in its place in the list.
 //
 // The refusals are *PathError, and only the kind is meant for anyone outside
 // the agent: KindInvalid, KindForbidden, KindTooBroad, KindNotFound,
@@ -117,6 +133,7 @@ func (r *Roots) Authorize(path string) (string, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
+	r.confirmAllLocked()
 	checked, err := r.check("authorize", path)
 	if err != nil {
 		return "", err
@@ -142,8 +159,8 @@ func (r *Roots) Authorize(path string) (string, error) {
 		return "", err
 	}
 	if existing >= 0 {
-		// A stored root that was unavailable at startup and passes now: the
-		// store already has it, so only the status changes.
+		// A stored root that was unavailable, at startup or since, and
+		// passes now: the store already has it, so only the status changes.
 		r.entries[existing] = RootStatus{Path: realDir, Available: true}
 		return realDir, nil
 	}
@@ -371,6 +388,64 @@ func (r *Roots) authorizeChecked(checked checkedRoot) error {
 		return refusal("authorize", given, KindIO, "this directory could not be authorized")
 	}
 	return nil
+}
+
+// confirm checks the stored root whose real path is realDir, if it is one and
+// is available, and reports whether it is still the directory that was
+// authorized. A root that is not stored, which only a Guard used directly can
+// hold, is not Roots' to judge and is reported as confirmed.
+func (r *Roots) confirm(realDir string) bool {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	index := r.find(realDir)
+	if index < 0 || !r.entries[index].Available {
+		return true
+	}
+	return r.confirmLocked(index)
+}
+
+// confirmAllLocked checks every available root.
+func (r *Roots) confirmAllLocked() {
+	for index := range r.entries {
+		if r.entries[index].Available {
+			r.confirmLocked(index)
+		}
+	}
+}
+
+// confirmLocked checks that the available root at index is still the
+// directory the user authorized, and when it is not, releases it from the
+// Guard and lists it as unavailable with the reason. The state changes once,
+// so it is logged once, by kind.
+func (r *Roots) confirmLocked(index int) bool {
+	entry := r.entries[index]
+	reason := r.stillAuthorized(entry.Path)
+	if reason == "" {
+		return true
+	}
+	r.authorized.revokeExact(entry.Path)
+	r.entries[index] = RootStatus{Path: entry.Path, Reason: reason}
+	r.logger.Warn("a project root is no longer available", "kind", string(reason))
+	return false
+}
+
+// stillAuthorized is why the root stored as realDir is no longer the directory
+// it was authorized as, or "" when it still is: the directory now at realDir,
+// resolved through the home guard, passes the check Authorize makes, and is
+// os.SameFile with the directory the Guard holds open. A directory made at the
+// same path since is another directory, and is KindChanged.
+func (r *Roots) stillAuthorized(realDir string) ErrorKind {
+	checked, err := r.check("authorize", realDir)
+	if err != nil {
+		return KindOf(err)
+	}
+	// After the check, because describing the held directory needs it to be
+	// searchable, and one that is not has already been answered.
+	held, ok := r.authorized.heldInfo(realDir)
+	if !ok || checked.Real() != realDir || !os.SameFile(held, checked.info) {
+		return KindChanged
+	}
+	return ""
 }
 
 // recheck is the startup check of one stored root: everything Authorize

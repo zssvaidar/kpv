@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync/atomic"
 )
 
 // MaxListing is the most entries one listing returns. A directory with more
@@ -149,6 +150,9 @@ type Browser struct {
 	// home is the browse-only allowance. It is unexported and never returned,
 	// which is what keeps it browse-only.
 	home *Guard
+	// roots is the user's set of roots built over this Browser, if any. A
+	// browse that lands in one of them has it checked first (#67).
+	roots atomic.Pointer[Roots]
 }
 
 // NewBrowser returns a Browser over the roots authorized holds, plus home.
@@ -195,12 +199,54 @@ func (b *Browser) Close() error {
 // resolve resolves path against the authorized roots first and the home
 // directory second. A path either one accepts is browsable; a path both refuse
 // is refused with the same forbidden answer either would give.
-func (b *Browser) resolve(path string) (Path, error) {
+//
+// A path that lands in a stored root has that root checked first, so a root
+// that is gone, or is now another directory, is released and the path is
+// resolved again without it: what is at that path now is browsed through the
+// home allowance, read-only, and never through the descriptor of the
+// directory that was authorized. confirmed holds the roots already checked by
+// the same listing, so one listing checks each root once.
+func (b *Browser) resolve(path string, confirmed map[string]bool) (Path, error) {
 	resolved, err := b.authorized.resolve("browse", path)
+	if held := landedIn(resolved, err); held != "" && !b.confirm(held, confirmed) {
+		resolved, err = b.authorized.resolve("browse", path)
+	}
 	if err == nil || !IsForbidden(err) || b.home == nil {
 		return resolved, err
 	}
 	return b.home.resolve("browse", path)
+}
+
+// confirm reports whether the authorized root realDir is still the directory
+// that was authorized, asking the Roots built over this Browser once per
+// listing.
+func (b *Browser) confirm(realDir string, confirmed map[string]bool) bool {
+	roots := b.roots.Load()
+	if roots == nil || confirmed[realDir] {
+		return true
+	}
+	if !roots.confirm(realDir) {
+		return false
+	}
+	confirmed[realDir] = true
+	return true
+}
+
+// landedIn is the real path of the authorized root a resolution landed in,
+// whether it succeeded or failed inside that root, and "" when it landed in
+// none.
+func landedIn(resolved Path, err error) string {
+	if err == nil {
+		if resolved.owner != nil {
+			return resolved.owner.real
+		}
+		return ""
+	}
+	var fault *PathError
+	if errors.As(err, &fault) {
+		return fault.Root
+	}
+	return ""
 }
 
 // List reads one page of the directory at path: at most limit entries, which
@@ -237,7 +283,8 @@ func (b *Browser) List(path string, limit int) (Listing, error) {
 		return invalid("a directory to browse is named by an absolute path")
 	}
 
-	directory, err := b.resolve(path)
+	confirmed := map[string]bool{}
+	directory, err := b.resolve(path, confirmed)
 	if err != nil {
 		return Listing{}, err
 	}
@@ -263,7 +310,7 @@ func (b *Browser) List(path string, limit int) (Listing, error) {
 		Evidence:  []Evidence{},
 	}
 	for _, name := range names {
-		if entry, ok := b.describe(directory, name); ok {
+		if entry, ok := b.describe(directory, name, confirmed); ok {
 			listing.Entries = append(listing.Entries, entry)
 		}
 	}
@@ -278,7 +325,7 @@ func (b *Browser) List(path string, limit int) (Listing, error) {
 	}
 	listing.LooksLikeProject = len(listing.Evidence) > 0
 	if above := filepath.Dir(listing.Path); above != listing.Path {
-		if parent, err := b.resolve(above); err == nil {
+		if parent, err := b.resolve(above, confirmed); err == nil {
 			listing.Parent = parent.Real()
 		}
 	}
@@ -289,7 +336,7 @@ func (b *Browser) List(path string, limit int) (Listing, error) {
 // still there. An entry that vanished between reading the directory and
 // looking at it is the only kind left out of a listing: there is nothing left
 // to show. One that cannot be looked at is listed, by name, as unreadable.
-func (b *Browser) describe(directory Path, name string) (Entry, bool) {
+func (b *Browser) describe(directory Path, name string, confirmed map[string]bool) (Entry, bool) {
 	entry := Entry{Name: name, Path: filepath.Join(directory.Real(), name)}
 	child, err := directory.Join(name)
 	if err != nil {
@@ -313,7 +360,7 @@ func (b *Browser) describe(directory Path, name string) (Entry, bool) {
 		entry.Unreadable = !child.canRead(false)
 	case mode&fs.ModeSymlink != 0:
 		entry.Kind = EntrySymlink
-		entry.LinkTarget, entry.Unreadable = b.follow(entry.Path)
+		entry.LinkTarget, entry.Unreadable = b.follow(entry.Path, confirmed)
 	default:
 		// A pipe, a socket or a device is described and never opened:
 		// opening one can block or have an effect, and listing a directory
@@ -326,8 +373,8 @@ func (b *Browser) describe(directory Path, name string) (Entry, bool) {
 // follow says what the symbolic link at path leads to, by resolving it the way
 // any browsed path is resolved. A link that leads out of the browsable
 // directories is reported as outside and nothing past that is looked at.
-func (b *Browser) follow(path string) (LinkTarget, bool) {
-	target, err := b.resolve(path)
+func (b *Browser) follow(path string, confirmed map[string]bool) (LinkTarget, bool) {
+	target, err := b.resolve(path, confirmed)
 	switch KindOf(err) {
 	case "":
 	case KindForbidden:

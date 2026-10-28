@@ -313,6 +313,22 @@ func (g *Guard) revokeExact(realDir string) (string, bool) {
 	return "", false
 }
 
+// heldInfo describes the directory the root whose real path is exactly realDir
+// holds open: the directory that was authorized, wherever it is now and
+// whatever is now at realDir. It is false when there is no such root, or the
+// descriptor cannot be described.
+func (g *Guard) heldInfo(realDir string) (fs.FileInfo, bool) {
+	g.mutex.RLock()
+	defer g.mutex.RUnlock()
+	for _, authorized := range g.roots {
+		if authorized.real == realDir {
+			info, err := authorized.directory.Stat(".")
+			return info, err == nil
+		}
+	}
+	return nil, false
+}
+
 // Roots returns the real paths of the authorized roots, in the order they were
 // authorized.
 func (g *Guard) Roots() []string {

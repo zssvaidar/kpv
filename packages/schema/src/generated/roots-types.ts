@@ -1,7 +1,7 @@
 // Code generated from schema/roots.schema.json by scripts/generate-schema.mjs.
 // DO NOT EDIT. Run `pnpm run generate` instead; CI fails when packages/schema/src/generated/roots-types.ts is stale.
 /**
- * Why a stored root is not authorized, present exactly when available is false. notFound: it no longer exists. notDirectory: it is no longer a directory. unreadable: the agent may no longer read or search it. forbidden: it is no longer strictly inside the home directory, or it now holds the agent's own store. tooBroad: it is now the home directory, or above it. changed: it now resolves to a different real path, for example because a component of it was replaced by a symbolic link. overlaps: it is inside, or contains, a root stored before it. io: it could not be checked.
+ * Why a stored root is not authorized, present exactly when available is false. notFound: it no longer exists. notDirectory: it is no longer a directory. unreadable: the agent may no longer read or search it. forbidden: it is no longer strictly inside the home directory, or it now holds the agent's own store. tooBroad: it is now the home directory, or above it. changed: it is no longer the directory that was authorized: it now resolves to a different real path, for example because a component of it was replaced by a symbolic link, or another directory has been made at its path. overlaps: it is inside, or contains, a root stored before it. io: it could not be checked.
  *
  * This interface was referenced by `RootList`'s JSON-Schema
  * via the `definition` "rootUnavailableReason".
@@ -52,7 +52,7 @@ export interface ProjectRoot {
    */
   path: string;
   /**
-   * Whether the root is authorized right now. False for a stored root that failed the startup check.
+   * Whether the root is authorized right now. False for a stored root that failed the startup check, or that was found gone or no longer the directory that was authorized when it was last asked about, by a list, an authorization or a browse; it stays false until the root is authorized again or the agent restarts.
    */
   available: boolean;
   reason?: RootUnavailableReason;

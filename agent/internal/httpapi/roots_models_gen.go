@@ -42,7 +42,10 @@ func (j *AuthorizedRoot) UnmarshalJSON(value []byte) error {
 // silently dropped, and revoking it removes it from the store.
 type ProjectRoot struct {
 	// Whether the root is authorized right now. False for a stored root that failed
-	// the startup check.
+	// the startup check, or that was found gone or no longer the directory that was
+	// authorized when it was last asked about, by a list, an authorization or a
+	// browse; it stays false until the root is authorized again or the agent
+	// restarts.
 	Available bool `json:"available" yaml:"available"`
 
 	// The real, absolute path of the root, after every symbolic link on the way to it

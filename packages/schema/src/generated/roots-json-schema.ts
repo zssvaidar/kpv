@@ -39,7 +39,7 @@ export const rootsJsonSchema: Readonly<Record<string, unknown>> = {
         available: {
           type: 'boolean',
           description:
-            'Whether the root is authorized right now. False for a stored root that failed the startup check.',
+            'Whether the root is authorized right now. False for a stored root that failed the startup check, or that was found gone or no longer the directory that was authorized when it was last asked about, by a list, an authorization or a browse; it stays false until the root is authorized again or the agent restarts.',
         },
         reason: {
           $ref: '#/$defs/rootUnavailableReason',
@@ -49,7 +49,7 @@ export const rootsJsonSchema: Readonly<Record<string, unknown>> = {
     rootUnavailableReason: {
       title: 'RootUnavailableReason',
       description:
-        "Why a stored root is not authorized, present exactly when available is false. notFound: it no longer exists. notDirectory: it is no longer a directory. unreadable: the agent may no longer read or search it. forbidden: it is no longer strictly inside the home directory, or it now holds the agent's own store. tooBroad: it is now the home directory, or above it. changed: it now resolves to a different real path, for example because a component of it was replaced by a symbolic link. overlaps: it is inside, or contains, a root stored before it. io: it could not be checked.",
+        "Why a stored root is not authorized, present exactly when available is false. notFound: it no longer exists. notDirectory: it is no longer a directory. unreadable: the agent may no longer read or search it. forbidden: it is no longer strictly inside the home directory, or it now holds the agent's own store. tooBroad: it is now the home directory, or above it. changed: it is no longer the directory that was authorized: it now resolves to a different real path, for example because a component of it was replaced by a symbolic link, or another directory has been made at its path. overlaps: it is inside, or contains, a root stored before it. io: it could not be checked.",
       type: 'string',
       enum: [
         'notFound',

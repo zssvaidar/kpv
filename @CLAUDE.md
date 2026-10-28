@@ -269,9 +269,22 @@ the moment it is authorized; its `Revoke` is `Guard.Revoke`.
   `Guard.Authorize`. One that is now missing, not a directory, unreadable,
   outside home, too broad, overlapping an earlier one, or resolves to a
   different real path (`changed`) is not authorized; it is listed with
-  `available: false` and the reason, and revoking it removes it from the store.
-  `available` is that decision, made at startup or at authorization, not a
-  fresh look at the disk on every `GET`
+  `available: false` and the reason, and revoking it removes it from the store
+- `available` is also checked again whenever something asks about a root (#67):
+  every `GET`, every `POST` (before it answers, so it never says "already
+  authorized" about a directory that is gone), and every browse that lands in
+  a root. "Still the same directory" is `os.SameFile` between the descriptor
+  the guard holds and the directory now at the stored path, resolved through
+  the home guard, after the same check a `POST` makes. One that is gone is
+  `notFound`, `notDirectory` or `unreadable`; another directory at its path,
+  or a path that now leads elsewhere, is `changed`. It is released from the
+  guard at once (the same release as `Guard.Revoke`), so a browse of that
+  path then reads what is there now through the home allowance, read-only,
+  and one WARN with the kind is logged when the state changes. The entry
+  stays stored, in its place, until it is revoked, and it becomes available
+  again only by a `POST` of its path or at the next startup, never because a
+  `GET` or a browse looked at it. Watching the filesystem, and re-checking a
+  root before each write (#43), are not done
 - a missing store is no roots. One that cannot be read, or is not exactly the
   document above, is logged once by kind (`corrupt` or `unreadable`), the agent
   starts with no roots, and the file is renamed to `roots.json.corrupt-<UTC
