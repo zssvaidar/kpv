@@ -14,7 +14,7 @@ import type {
   ConnectionMonitor,
   ConnectionState,
 } from '../connection/monitor.ts';
-import { DirectoryStub } from './DirectoryStub.tsx';
+import { DirectoryPicker } from '../picker/DirectoryPicker.tsx';
 
 export function App(props: {
   client: AgentClient | null;
@@ -66,8 +66,8 @@ export function Shell(props: {
         )}
       </main>
       <aside className="side-panel" aria-label="Side panel">
-        <h2>Home directory</h2>
-        <DirectoryStub client={client} connected={connected} />
+        <h2>Project directory</h2>
+        <DirectoryPicker client={client} connection={state} />
       </aside>
       <footer className="bottom-panel" aria-label="Bottom panel">
         <span>Agent: {description.label}</span>

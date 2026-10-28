@@ -20,6 +20,15 @@ export const reopenAdvice =
   '"open" URL that pnpm dev printed). This page does not keep the session ' +
   'token anywhere a reload could find it, so a reload cannot recover it.';
 
+/** What a page with no answer at all says, without the retry. */
+const nothingAnswered =
+  'Nothing answered: the agent is not running, or not where it was.';
+
+/** What a page with an answer it cannot read says, without the retry. */
+function notUnderstood(httpStatus: number): string {
+  return `The agent answered with HTTP ${httpStatus}, which this page does not understand.`;
+}
+
 function seconds(ms: number): string {
   const s = Math.max(1, Math.round(ms / 1000));
   return s === 1 ? '1 second' : `${s} seconds`;
@@ -53,13 +62,49 @@ export function describeConnection(
       return {
         label: 'Agent not reachable',
         tone: 'down',
-        detail: `Nothing answered: the agent is not running, or not where it was. Retrying in ${seconds(state.retryInMs)}.`,
+        detail: `${nothingAnswered} Retrying in ${seconds(state.retryInMs)}.`,
       };
     case 'failed':
       return {
         label: 'Agent error',
         tone: 'down',
-        detail: `The agent answered with HTTP ${state.httpStatus}, which this page does not understand. Retrying in ${seconds(state.retryInMs)}.`,
+        detail: `${notUnderstood(state.httpStatus)} Retrying in ${seconds(state.retryInMs)}.`,
+      };
+  }
+}
+
+/**
+ * What one request's outcome says when it is not the endpoint's own answer:
+ * the same states, in the same words, as the connection above, because a
+ * request that is rejected, unanswered or not understood means exactly what
+ * the channel failing that way means. Only the retry is left out, since a
+ * single request is not retried on a timer.
+ */
+export type RequestProblem =
+  | { kind: 'rejected' }
+  | { kind: 'unreachable' }
+  | { kind: 'failed'; status: number };
+
+export function describeRequestProblem(
+  problem: RequestProblem,
+): ConnectionDescription {
+  switch (problem.kind) {
+    case 'rejected':
+      return describeConnection({
+        status: 'unauthenticated',
+        reason: 'rejected',
+      });
+    case 'unreachable':
+      return {
+        label: 'Agent not reachable',
+        tone: 'down',
+        detail: nothingAnswered,
+      };
+    case 'failed':
+      return {
+        label: 'Agent error',
+        tone: 'down',
+        detail: notUnderstood(problem.status),
       };
   }
 }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { describeConnection, reopenAdvice } from './describe.ts';
+import {
+  describeConnection,
+  describeRequestProblem,
+  reopenAdvice,
+} from './describe.ts';
 import type { ConnectionState } from './monitor.ts';
 
 const every: ConnectionState[] = [
@@ -55,5 +59,24 @@ describe('describeConnection', () => {
     expect(
       describeConnection({ status: 'unreachable', retryInMs: 4000 }).detail,
     ).toContain('4 seconds');
+  });
+});
+
+describe('describeRequestProblem', () => {
+  it("words a request's problem as the connection state it means, without a retry", () => {
+    const rejected = describeRequestProblem({ kind: 'rejected' });
+    expect(rejected).toEqual(
+      describeConnection({ status: 'unauthenticated', reason: 'rejected' }),
+    );
+    expect(rejected.detail).toContain(reopenAdvice);
+    const absent = describeRequestProblem({ kind: 'unreachable' });
+    expect(absent.label).toBe(
+      describeConnection({ status: 'unreachable', retryInMs: 1000 }).label,
+    );
+    expect(absent.detail).not.toContain('Retrying');
+    const failed = describeRequestProblem({ kind: 'failed', status: 502 });
+    expect(failed.label).toBe('Agent error');
+    expect(failed.detail).toContain('HTTP 502');
+    expect(failed.detail).not.toContain('Retrying');
   });
 });

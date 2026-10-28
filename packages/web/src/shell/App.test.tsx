@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { reopenAdvice } from '../connection/describe.ts';
 import { createConnectionMonitor } from '../connection/monitor.ts';
 import { App, Shell } from './App.tsx';
-import { DirectoryView } from './DirectoryStub.tsx';
 
 // What a person reads, without the markup: React escapes quotes in text.
 const text = (html: string) =>
@@ -62,54 +61,5 @@ describe('App', () => {
     expect(html).toContain('data-state="unauthenticated"');
     expect(text(html)).toContain('Not authorized');
     expect(text(html)).toContain(reopenAdvice);
-  });
-});
-
-describe('DirectoryView', () => {
-  it('renders the listing the agent answered', () => {
-    const html = renderToStaticMarkup(
-      <DirectoryView
-        listing={{
-          kind: 'ok',
-          value: {
-            path: '/home/user',
-            entries: [
-              {
-                name: 'code',
-                path: '/home/user/code',
-                kind: 'directory',
-                unreadable: false,
-              },
-              {
-                name: 'notes.txt',
-                path: '/home/user/notes.txt',
-                kind: 'file',
-                unreadable: false,
-              },
-            ],
-            truncated: false,
-            limit: 100,
-            looksLikeProject: false,
-            evidence: [],
-          },
-        }}
-      />,
-    );
-    expect(html).toContain('/home/user');
-    expect(html).toContain('code/');
-    expect(html).toContain('notes.txt');
-  });
-
-  it("renders the endpoint's own error in its words", () => {
-    const html = renderToStaticMarkup(
-      <DirectoryView
-        listing={{
-          kind: 'error',
-          status: 403,
-          error: { error: 'forbidden', message: 'not browsable' },
-        }}
-      />,
-    );
-    expect(html).toContain('not browsable');
   });
 });
