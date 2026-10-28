@@ -42,6 +42,22 @@ describe('PipelineGraph', () => {
     ]);
   });
 
+  it("draws each node with its block's own component", () => {
+    const html = render(null);
+    const types = [
+      ...html.matchAll(/class="block-node" data-type="([^"]+)"/g),
+    ].map((match) => match[1]);
+    expect(types).toEqual([
+      'kafkaSource',
+      'filter',
+      'transform',
+      'validate',
+      'customCode',
+      'kafkaDestination',
+    ]);
+    expect(html).toContain('aria-label="Validate: require-amount"');
+  });
+
   it('marks the selected node, and only that one', () => {
     const html = render('step:require-amount');
     const selected = [

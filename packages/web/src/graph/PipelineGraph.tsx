@@ -8,8 +8,7 @@
 // selected, and that is not kept here either: it is handed in and reported
 // out, so whoever owns it (the shell) can show it in the side panel.
 //
-// Editing is #11 and block-specific nodes are #10; until then every block is
-// a placeholder node that names its type and id.
+// Editing is #11. Each node is drawn by the block's own component (#10).
 
 import '@xyflow/react/dist/style.css';
 import './graph.css';
@@ -26,30 +25,20 @@ import { useCallback, useMemo } from 'react';
 
 import type { Pipeline } from '@kpv/schema';
 
+import { BlockNodeView } from '../blocks/BlockNode.tsx';
+
 import type { BlockNode } from './layout.ts';
 import { layoutPipeline } from './layout.ts';
 
-/** What the placeholder node says a block is. */
-export const blockTypeLabel: Record<
-  BlockNode['data']['block']['type'],
-  string
-> = {
-  kafkaSource: 'Kafka source',
-  filter: 'Filter',
-  transform: 'Transform',
-  validate: 'Validate',
-  customCode: 'Custom code',
-  kafkaDestination: 'Kafka destination',
-};
-
 /**
- * A stand-in for the block components of #10. Its handles are there because
- * an edge needs them to attach to, and are neither connectable nor visible.
+ * A block's node on the graph: its block component (#10) between the handles
+ * its edges attach to, which are neither connectable nor visible. A source
+ * has nothing coming in and a destination nothing going out.
  */
-function PlaceholderNode(props: NodeProps<BlockNode>) {
+function GraphBlockNode(props: NodeProps<BlockNode>) {
   const { data } = props;
   return (
-    <div className="block-node" data-role={data.role}>
+    <>
       {data.role === 'source' ? null : (
         <Handle
           type="target"
@@ -60,8 +49,7 @@ function PlaceholderNode(props: NodeProps<BlockNode>) {
           className="block-handle"
         />
       )}
-      <span className="block-type">{blockTypeLabel[data.block.type]}</span>
-      <span className="block-id">{data.block.id}</span>
+      <BlockNodeView block={data.block} />
       {data.role === 'destination' ? null : (
         <Handle
           type="source"
@@ -72,11 +60,11 @@ function PlaceholderNode(props: NodeProps<BlockNode>) {
           className="block-handle"
         />
       )}
-    </div>
+    </>
   );
 }
 
-const nodeTypes: NodeTypes = { block: PlaceholderNode };
+const nodeTypes: NodeTypes = { block: GraphBlockNode };
 
 /**
  * The switches that make the view read-only: nothing can be dragged,

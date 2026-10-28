@@ -3,8 +3,8 @@
 
 import type { Pipeline } from '@kpv/schema';
 
+import { blockKindLabel } from '../blocks/BlockNode.tsx';
 import { blockForNode } from './layout.ts';
-import { blockTypeLabel } from './PipelineGraph.tsx';
 
 export function SelectionSummary(props: {
   pipeline: Pipeline;
@@ -20,7 +20,7 @@ export function SelectionSummary(props: {
   }
   return (
     <p className="selection" data-selected={props.selected ?? ''}>
-      Selected: {blockTypeLabel[placed.block.type]}{' '}
+      Selected: {blockKindLabel[placed.block.type]}{' '}
       <code>{placed.block.id}</code>
     </p>
   );

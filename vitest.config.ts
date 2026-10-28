@@ -14,6 +14,9 @@ export default defineConfig({
       'packages/*/dev/**/*.test.ts',
     ],
     passWithNoTests: false,
+    // Stylesheets are read as empty in tests, except the block nodes', whose
+    // colours and sizing packages/web/src/blocks/BlockNode.test.tsx checks.
+    css: { include: [/\/src\/blocks\/blocks\.css/] },
   },
   resolve: {
     alias: {
