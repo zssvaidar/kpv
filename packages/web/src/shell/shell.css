@@ -151,8 +151,14 @@ body,
 .picker-live,
 .picker-stale,
 .picker-truncated,
-.picker-outcome {
+.picker-outcome,
+.picker-gone {
   font-size: 0.9rem;
+}
+
+.picker-gone {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .picker-stale {

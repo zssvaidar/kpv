@@ -19,7 +19,13 @@
 //   - A request that is rejected, unanswered or not understood is a connection
 //     problem, not a picker error. It is reported in #8's words (see
 //     describeRequestProblem) and treated like being offline until a request
-//     succeeds again.
+//     succeeds again. It is the picker's own request's problem: while the
+//     channel is up the page says so, and when the channel goes the problem is
+//     dropped, since the reconnect re-read decides what is true then.
+//
+// An authorize or revoke that was not answered readably is "unconfirmed"
+// until a roots read started after it succeeds; that read settles it, in
+// words that claim no more than the agent's list shows (#66).
 
 import type {
   DirectoryError,
@@ -32,7 +38,8 @@ import type { AgentClient, AgentResult } from '../api/client.ts';
 import type { RequestProblem } from '../connection/describe.ts';
 import {
   directoryErrorWords,
-  rootsErrorWords,
+  listingGoneNote,
+  rootsOutcomeSentence,
   truncationNote,
 } from './words.ts';
 
@@ -43,18 +50,40 @@ export interface BrowseFailure {
   error: DirectoryError;
 }
 
+export type RootsAction = 'authorize' | 'revoke';
+
+/**
+ * Why an authorize or revoke is not known to have happened:
+ *   - `dropped`: the connection went before the agent answered;
+ *   - `unreachable`: the request got no answer while the channel was up;
+ *   - `failed`: the agent answered, in a form the page could not read.
+ */
+export type UnconfirmedReason =
+  | { kind: 'dropped' }
+  | { kind: 'unreachable' }
+  | { kind: 'failed'; status: number };
+
 /** The outcome of the last authorize or revoke, until the next one. */
 export type RootsOutcome =
   | { kind: 'authorized'; path: string }
   | { kind: 'revoked'; path: string }
   | {
       kind: 'refused';
-      action: 'authorize' | 'revoke';
+      action: RootsAction;
       path: string;
       error: RootsError;
     }
-  /** The connection went before the agent answered: not known to have happened. */
-  | { kind: 'unconfirmed'; action: 'authorize' | 'revoke'; path: string };
+  /** The uniform 404: rejected before the route ran, so nothing changed. */
+  | { kind: 'rejected'; action: RootsAction; path: string }
+  /** Not known to have happened, until a later roots read settles it. */
+  | {
+      kind: 'unconfirmed';
+      action: RootsAction;
+      path: string;
+      reason: UnconfirmedReason;
+    }
+  /** An unconfirmed outcome, settled by whether the agent's list has `path`. */
+  | { kind: 'settled'; action: RootsAction; path: string; listed: boolean };
 
 export interface PickerState {
   /** Whether the connection monitor says the agent is connected. */
@@ -65,6 +94,12 @@ export interface PickerState {
   browsing: { path: string | null } | null;
   /** The last browse's own error, until a browse succeeds. */
   browseError: BrowseFailure | null;
+  /**
+   * The failure of the latest browse of the listed directory's own path, until
+   * a browse succeeds: what is listed may be gone, so it is not offered for
+   * authorizing. A failed browse of another path leaves it as it is.
+   */
+  listingFailure: BrowseFailure | null;
   /** The authorized roots, `null` until first read. */
   roots: ProjectRoot[] | null;
   /** The roots list's own error, until it is read successfully. */
@@ -72,7 +107,7 @@ export interface PickerState {
   /** A request the agent rejected, did not answer or answered unreadably. */
   problem: RequestProblem | null;
   /** The authorize or revoke in flight; only one at a time. */
-  busy: { action: 'authorize' | 'revoke'; path: string } | null;
+  busy: { action: RootsAction; path: string } | null;
   outcome: RootsOutcome | null;
   /** The sentence the live region reads out for the latest outcome. */
   announcement: string;
@@ -107,6 +142,15 @@ export function canChangeRoots(state: PickerState): boolean {
   return !isLastKnown(state) && state.busy === null;
 }
 
+/** Whether the listed directory could not be listed again just now. */
+export function listingGone(state: PickerState): boolean {
+  return (
+    state.listing !== null &&
+    state.listingFailure !== null &&
+    state.listingFailure.path === state.listing.path
+  );
+}
+
 /** The stored root at exactly the listed path, if there is one. */
 export function rootAt(
   state: PickerState,
@@ -122,6 +166,7 @@ export function createPickerController(client: AgentClient): PickerController {
     listing: null,
     browsing: null,
     browseError: null,
+    listingFailure: null,
     roots: null,
     rootsError: null,
     problem: null,
@@ -136,6 +181,13 @@ export function createPickerController(client: AgentClient): PickerController {
   // it is not trusted, whatever it says.
   let epoch = 0;
   let started = false;
+  // The roots read count when the current unconfirmed outcome was set: only a
+  // read started after it may settle it.
+  let unconfirmedAt = 0;
+  // The problem of the last roots read, until a roots read succeeds: a browse
+  // that succeeds in the meantime says nothing about the roots list, so it
+  // does not clear it.
+  let rootsProblem: RequestProblem | null = null;
 
   function set(next: Partial<PickerState>) {
     state = { ...state, ...next };
@@ -167,23 +219,37 @@ export function createPickerController(client: AgentClient): PickerController {
     }
     if (result.kind === 'ok') {
       const listing = result.value;
+      // A re-read landing after the roots list settled an outcome keeps the
+      // settled sentence in the announcement rather than replacing it.
+      const settled =
+        !byUser &&
+        state.outcome?.kind === 'settled' &&
+        state.announcement === rootsOutcomeSentence(state.outcome)
+          ? ` ${state.announcement}`
+          : '';
       set({
         listing,
         browsing: null,
         browseError: null,
-        problem: null,
+        listingFailure: null,
+        problem: rootsProblem,
         focusTick: byUser ? state.focusTick + 1 : state.focusTick,
-        announcement: describeListing(listing),
+        announcement: describeListing(listing) + settled,
       });
       return;
     }
     if (result.kind === 'error') {
       const words = directoryErrorWords[result.error.error];
+      const failure = { path, error: result.error };
+      const own = path !== null && path === state.listing?.path;
       set({
         browsing: null,
-        browseError: { path, error: result.error },
-        problem: null,
-        announcement: `${words.title}. ${result.error.message}`,
+        browseError: failure,
+        problem: rootsProblem,
+        ...(own ? { listingFailure: failure } : {}),
+        announcement: own
+          ? `${words.title}. ${result.error.message} ${listingGoneNote(path, result.error.error)}`
+          : `${words.title}. ${result.error.message}`,
       });
       return;
     }
@@ -201,14 +267,36 @@ export function createPickerController(client: AgentClient): PickerController {
       return;
     }
     switch (result.kind) {
-      case 'ok':
-        set({ roots: result.value.roots, rootsError: null, problem: null });
+      case 'ok': {
+        const roots = result.value.roots;
+        const outcome = state.outcome;
+        if (outcome?.kind === 'unconfirmed' && seq > unconfirmedAt) {
+          const settled: RootsOutcome = {
+            kind: 'settled',
+            action: outcome.action,
+            path: outcome.path,
+            listed: roots.some((root) => root.path === outcome.path),
+          };
+          rootsProblem = null;
+          set({
+            roots,
+            rootsError: null,
+            problem: null,
+            outcome: settled,
+            announcement: rootsOutcomeSentence(settled),
+          });
+          return;
+        }
+        rootsProblem = null;
+        set({ roots, rootsError: null, problem: null });
         return;
+      }
       case 'error':
         set({ rootsError: result.error });
         return;
       default:
-        set({ problem: linkProblem(result) });
+        rootsProblem = linkProblem(result);
+        set({ problem: rootsProblem });
     }
   }
 
@@ -234,36 +322,34 @@ export function createPickerController(client: AgentClient): PickerController {
         const authorized = result.value.path;
         // Shown at once, then the list is read from the agent to confirm.
         const roots = state.roots ?? [];
+        const outcome: RootsOutcome = { kind: 'authorized', path: authorized };
         set({
           busy: null,
-          outcome: { kind: 'authorized', path: authorized },
+          outcome,
           roots: roots.some((root) => root.path === authorized)
             ? roots
             : [...roots, { path: authorized, available: true }],
-          announcement: `Authorized ${authorized}.`,
+          announcement: rootsOutcomeSentence(outcome),
         });
         void loadRoots();
         return;
       }
-      case 'error':
+      case 'error': {
+        const outcome: RootsOutcome = {
+          kind: 'refused',
+          action: 'authorize',
+          path,
+          error: result.error,
+        };
         set({
           busy: null,
-          outcome: {
-            kind: 'refused',
-            action: 'authorize',
-            path,
-            error: result.error,
-          },
-          announcement: `Not authorized. ${rootsErrorWords[result.error.error].title}. ${result.error.message}`,
+          outcome,
+          announcement: rootsOutcomeSentence(outcome),
         });
         return;
+      }
       default:
-        set({
-          busy: null,
-          outcome: { kind: 'unconfirmed', action: 'authorize', path },
-          problem: linkProblem(result),
-          announcement: unconfirmed('authorize', path),
-        });
+        unanswered('authorize', path, result);
     }
   }
 
@@ -278,37 +364,84 @@ export function createPickerController(client: AgentClient): PickerController {
       return;
     }
     switch (result.kind) {
-      case 'ok':
+      case 'ok': {
         rootsSeq++;
+        const outcome: RootsOutcome = { kind: 'revoked', path };
         set({
           busy: null,
           roots: result.value.roots,
           rootsError: null,
-          outcome: { kind: 'revoked', path },
-          announcement: `Revoked ${path}. Nothing on disk was deleted.`,
+          outcome,
+          announcement: rootsOutcomeSentence(outcome),
         });
         return;
-      case 'error':
+      }
+      case 'error': {
+        const outcome: RootsOutcome = {
+          kind: 'refused',
+          action: 'revoke',
+          path,
+          error: result.error,
+        };
         set({
           busy: null,
-          outcome: {
-            kind: 'refused',
-            action: 'revoke',
-            path,
-            error: result.error,
-          },
-          announcement: `Not revoked. ${rootsErrorWords[result.error.error].title}. ${result.error.message}`,
+          outcome,
+          announcement: rootsOutcomeSentence(outcome),
         });
         // Most often another tab revoked it first: show what the agent has.
         void loadRoots();
         return;
+      }
       default:
+        unanswered('revoke', path, result);
+    }
+  }
+
+  /** Sets an outcome that only a roots read started after it may settle. */
+  function unconfirmed(
+    action: RootsAction,
+    path: string,
+    reason: UnconfirmedReason,
+    next: Partial<PickerState> = {},
+  ) {
+    unconfirmedAt = rootsSeq;
+    const outcome: RootsOutcome = { kind: 'unconfirmed', action, path, reason };
+    set({
+      ...next,
+      busy: null,
+      outcome,
+      announcement: rootsOutcomeSentence(outcome),
+    });
+  }
+
+  /** An authorize or revoke answered with no answer of its own. */
+  function unanswered(
+    action: RootsAction,
+    path: string,
+    result: AgentResult<unknown, unknown>,
+  ) {
+    const problem = linkProblem(result);
+    switch (result.kind) {
+      case 'rejected': {
+        const outcome: RootsOutcome = { kind: 'rejected', action, path };
         set({
           busy: null,
-          outcome: { kind: 'unconfirmed', action: 'revoke', path },
-          problem: linkProblem(result),
-          announcement: unconfirmed('revoke', path),
+          outcome,
+          problem,
+          announcement: rootsOutcomeSentence(outcome),
         });
+        return;
+      }
+      case 'failed':
+        unconfirmed(
+          action,
+          path,
+          { kind: 'failed', status: result.status },
+          { problem },
+        );
+        return;
+      default:
+        unconfirmed(action, path, { kind: 'unreachable' }, { problem });
     }
   }
 
@@ -327,17 +460,15 @@ export function createPickerController(client: AgentClient): PickerController {
         browseSeq++;
         rootsSeq++;
         const busy = state.busy;
-        set({
-          online: false,
-          browsing: null,
-          busy: null,
-          ...(busy === null
-            ? {}
-            : {
-                outcome: { kind: 'unconfirmed', ...busy },
-                announcement: unconfirmed(busy.action, busy.path),
-              }),
-        });
+        // The picker's own request problem is dropped with the connection:
+        // the re-read on reconnect decides what is shown after it.
+        rootsProblem = null;
+        const next = { online: false, browsing: null, problem: null };
+        if (busy === null) {
+          set(next);
+        } else {
+          unconfirmed(busy.action, busy.path, { kind: 'dropped' }, next);
+        }
         return;
       }
       set({ online: true });
@@ -363,11 +494,6 @@ export function createPickerController(client: AgentClient): PickerController {
       void revoke(path);
     },
   };
-}
-
-function unconfirmed(action: 'authorize' | 'revoke', path: string): string {
-  const verb = action === 'authorize' ? 'Authorizing' : 'Revoking';
-  return `${verb} ${path} was not confirmed: the connection to the agent went before it answered. The list of authorized directories will be read again from the agent.`;
 }
 
 /** What the live region says when a directory is listed. */

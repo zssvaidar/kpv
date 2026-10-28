@@ -18,7 +18,11 @@ import { createPickerController, type PickerController } from './controller.ts';
 import { DirectoryPicker, PickerView } from './DirectoryPicker.tsx';
 import { fakeAgent, json, rejection, type FakeAgent } from './fake-agent.ts';
 import { directoryFixtures, rootsFixtures } from './fixtures.ts';
-import { directoryErrorWords, rootsErrorWords } from './words.ts';
+import {
+  directoryErrorWords,
+  pickerProblemScope,
+  rootsErrorWords,
+} from './words.ts';
 
 // What a person reads, without the markup: React escapes text.
 const text = (html: string) =>
@@ -787,6 +791,7 @@ describe('connection problems', () => {
       kind: 'unconfirmed',
       action: 'authorize',
       path: '/home/user/app',
+      reason: { kind: 'dropped' },
     });
     expect(picker.current().roots).toEqual([]);
     expect(text(render(picker))).toContain('Not confirmed');
@@ -913,5 +918,730 @@ describe('accessibility in the markup', () => {
     expect(render(picker)).toMatch(
       /<h3 id="[^"]+" tabindex="-1">Current directory/,
     );
+  });
+});
+
+// #66: the picker says why something is unknown or not done, for the reason
+// that applies and only while it applies.
+
+type Held = ReturnType<FakeAgent['next']>;
+const unreadable = () => json(200, { unexpected: true });
+const answerWith = {
+  rejected: (r: Held) => r.answer(rejection()),
+  unreachable: (r: Held) => r.drop(),
+  failed: (r: Held) => r.answer(unreadable()),
+} as const;
+type ProblemKind = keyof typeof answerWith;
+const problemKinds = Object.keys(answerWith) as ProblemKind[];
+
+const staleCause: Record<ProblemKind, string> = {
+  rejected: 'the agent rejected the picker’s last request',
+  unreachable: 'the agent did not answer the picker’s last request',
+  failed: 'the agent’s last answer to the picker could not be read',
+};
+
+const app = { ...topOfHome, path: '/home/user/app', parent: '/home/user' };
+const appRoot = { path: '/home/user/app', available: true };
+
+/** The text of the element with `attr`, e.g. `data-stale="true"`. */
+function element(html: string, attr: string): string {
+  const found = new RegExp(`<(\\w+)[^>]*${attr}[^>]*>.*?</\\1>`).exec(html);
+  if (found === null) {
+    throw new Error(`no element with ${attr} in ${text(html)}`);
+  }
+  return text(found[0]).trim();
+}
+
+/** The live region's text, which must be what is on screen too. */
+function announced(html: string): string {
+  const found = /role="status" aria-live="polite">(.*?)<\/p>/.exec(html);
+  return text(found?.[1] ?? '').trim();
+}
+
+describe('#66 part 1: the stale note gives the real reason', () => {
+  it.each(problemKinds)(
+    'a %s picker request with the channel up says so, not "not connected"',
+    async (kind) => {
+      const { agent, picker } = await opened(project, someRoots);
+      picker.open('/home/user/code/.git');
+      answerWith[kind](agent.next('GET', '/api/directories'));
+      await agent.settle();
+      expect(picker.current().online).toBe(true);
+      const html = render(picker);
+      const note = element(html, 'data-stale="true"');
+      expect(note).toContain(staleCause[kind]);
+      expect(note).toContain('may be out of date');
+      expect(note).not.toContain('not connected');
+      expect(html).toContain(`data-cause="${kind}"`);
+      // The notice says it is about the picker's request, not the connection.
+      expect(text(html)).toContain('The picker’s last request:');
+      expect(text(html)).toContain(pickerProblemScope);
+      expect(text(html)).not.toContain('not connected');
+      expect(text(html)).toContain('Current directory (last known)');
+    },
+  );
+
+  it.each(problemKinds)(
+    'a %s roots read with the channel up says so too',
+    async (kind) => {
+      const agent = fakeAgent();
+      const picker = createPickerController(agent.client);
+      picker.setOnline(true);
+      agent.next('GET', '/api/directories').answer(json(200, project));
+      await agent.settle();
+      answerWith[kind](agent.next('GET', '/api/roots'));
+      await agent.settle();
+      const note = element(render(picker), 'data-stale="true"');
+      expect(note).toContain(staleCause[kind]);
+      expect(note).not.toContain('not connected');
+    },
+  );
+
+  it.each(problemKinds)(
+    'a %s problem switches to "not connected" when the channel drops, and the re-read clears it',
+    async (kind) => {
+      const { agent, picker } = await opened(project, someRoots);
+      picker.open('/home/user/code/.git');
+      answerWith[kind](agent.next('GET', '/api/directories'));
+      await agent.settle();
+      picker.setOnline(false);
+      let html = render(picker);
+      expect(element(html, 'data-stale="true"')).toContain(
+        'the agent is not connected',
+      );
+      expect(html).toContain('data-cause="disconnected"');
+      expect(text(html)).not.toContain(staleCause[kind]);
+      // The status bar speaks for the connection now; no picker notice.
+      expect(html).not.toContain('picker-problem');
+      picker.setOnline(true);
+      agent.next('GET', '/api/directories').answer(json(200, project));
+      agent.next('GET', '/api/roots').answer(json(200, someRoots));
+      await agent.settle();
+      html = render(picker);
+      expect(html).not.toContain('data-stale');
+      expect(text(html)).not.toContain('last known');
+      expect(html).not.toContain('picker-problem');
+    },
+  );
+
+  it.each(['unreachable', 'failed'] as const)(
+    'after a %s problem, Try again that succeeds clears the note, "(last known)" and the notice, and enables authorize and revoke',
+    async (kind) => {
+      const { agent, picker } = await opened(app, someRoots);
+      picker.open('/home/user/code/.git');
+      answerWith[kind](agent.next('GET', '/api/directories'));
+      await agent.settle();
+      let html = render(picker);
+      expect(isDisabled(button(html, 'Authorize this directory'))).toBe(true);
+      expect(isDisabled(button(html, 'Revoke /home/user/code/app'))).toBe(true);
+      expect(button(html, 'Try again')).toBeTruthy();
+      picker.refresh();
+      expect(agent.next('GET', '/api/directories').queryPath).toBe(
+        '/home/user/app',
+      );
+      agent.next('GET', '/api/directories').answer(json(200, app));
+      agent.next('GET', '/api/roots').answer(json(200, someRoots));
+      await agent.settle();
+      html = render(picker);
+      expect(html).not.toContain('data-stale');
+      expect(text(html)).not.toContain('last known');
+      expect(html).not.toContain('picker-problem');
+      expect(isDisabled(button(html, 'Authorize this directory'))).toBe(false);
+      expect(isDisabled(button(html, 'Revoke /home/user/code/app'))).toBe(
+        false,
+      );
+    },
+  );
+});
+
+describe('#66 part 2: a rejected or unreadable authorize or revoke gives the real reason', () => {
+  async function authorizeWith(answer: (r: Held) => void) {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.authorize();
+    answer(agent.next('POST', '/api/roots'));
+    await agent.settle();
+    return { agent, picker, html: render(picker) };
+  }
+  async function revokeWith(answer: (r: Held) => void) {
+    const { agent, picker } = await opened(topOfHome, someRoots);
+    picker.revoke('/home/user/code/app');
+    answer(agent.next('DELETE', '/api/roots'));
+    await agent.settle();
+    return { agent, picker, html: render(picker) };
+  }
+
+  it('a rejected authorize says the agent rejected it, so it was not authorized', async () => {
+    const { picker, html } = await authorizeWith(answerWith.rejected);
+    const outcome = element(html, 'data-outcome="rejected"');
+    expect(outcome).toBe(
+      'Not authorized: the agent rejected the request, so /home/user/app was not authorized. Nothing was changed on the agent.',
+    );
+    expect(text(html)).not.toContain('connection went');
+    expect(announced(html)).toBe(outcome);
+    expect(text(button(html, 'Authorize this directory')).trim()).toBe(
+      'Authorize this directory',
+    );
+    expect(picker.current().roots).toEqual([]);
+  });
+
+  it('a rejected revoke says the agent rejected it, so it was not revoked', async () => {
+    const { picker, html } = await revokeWith(answerWith.rejected);
+    const outcome = element(html, 'data-outcome="rejected"');
+    expect(outcome).toBe(
+      'Not revoked: the agent rejected the request, so /home/user/code/app was not revoked. Nothing was changed on the agent.',
+    );
+    expect(text(html)).not.toContain('connection went');
+    expect(announced(html)).toBe(outcome);
+    expect(text(html)).not.toContain('Revoking…');
+    expect(picker.current().roots).toEqual(someRoots.roots);
+  });
+
+  it.each([
+    ['authorize', 'authorized'],
+    ['revoke', 'revoked'],
+  ] as const)(
+    'an unreadable answer to %s says the agent answered but it could not be read',
+    async (action, done) => {
+      const { picker, html } =
+        action === 'authorize'
+          ? await authorizeWith(answerWith.failed)
+          : await revokeWith(answerWith.failed);
+      const outcome = element(html, 'data-reason="failed"');
+      expect(outcome).toContain('Not confirmed: the agent answered');
+      expect(outcome).toContain('the answer could not be read');
+      expect(outcome).toContain(`it is not known whether`);
+      expect(outcome).toContain(`was ${done}`);
+      expect(text(html)).not.toContain('connection went');
+      expect(html).not.toContain(`data-outcome="${done}"`);
+      expect(announced(html)).toBe(outcome);
+      expect(picker.current().busy).toBeNull();
+      expect(picker.current().roots).toEqual(
+        action === 'authorize' ? [] : someRoots.roots,
+      );
+    },
+  );
+
+  it.each([
+    ['authorize', 'authorized'],
+    ['revoke', 'revoked'],
+  ] as const)(
+    'no answer to %s with the channel up says the agent did not answer',
+    async (action, done) => {
+      const { picker, html } =
+        action === 'authorize'
+          ? await authorizeWith(answerWith.unreachable)
+          : await revokeWith(answerWith.unreachable);
+      const outcome = element(html, 'data-reason="unreachable"');
+      expect(outcome).toContain(
+        'Not confirmed: the agent did not answer, so it is not known whether',
+      );
+      expect(outcome).toContain(`was ${done}`);
+      expect(text(html)).not.toContain('connection went');
+      expect(announced(html)).toBe(outcome);
+      expect(picker.current().busy).toBeNull();
+    },
+  );
+
+  it.each([
+    ['authorize', 'authorized'],
+    ['revoke', 'revoked'],
+  ] as const)(
+    'the connection dropping during %s keeps "the connection went before the agent answered"',
+    async (action, done) => {
+      const { agent, picker } =
+        action === 'authorize'
+          ? await opened(app, noRoots)
+          : await opened(topOfHome, someRoots);
+      if (action === 'authorize') picker.authorize();
+      else picker.revoke('/home/user/code/app');
+      const held = agent.next(
+        action === 'authorize' ? 'POST' : 'DELETE',
+        '/api/roots',
+      );
+      picker.setOnline(false);
+      held.drop();
+      await agent.settle();
+      const html = render(picker);
+      const outcome = element(html, 'data-reason="dropped"');
+      expect(outcome).toContain(
+        'Not confirmed: the connection went before the agent answered',
+      );
+      expect(outcome).toContain(`is not known to be ${done}`);
+      expect(announced(html)).toBe(outcome);
+      expect(text(html)).not.toContain('Authorizing…');
+      expect(text(html)).not.toContain('Revoking…');
+    },
+  );
+
+  it('a revoke notFound body is still "Not revoked: Not there", not a rejection', async () => {
+    const { html } = await revokeWith((r) =>
+      r.answer(
+        json(404, {
+          error: 'notFound',
+          message: 'this path is not an authorized project directory',
+        }),
+      ),
+    );
+    expect(text(html)).toContain('Not revoked: Not there');
+    expect(text(html)).toContain(
+      'perhaps because it was revoked in another tab',
+    );
+    expect(html).not.toContain('data-outcome="rejected"');
+    expect(text(html)).not.toContain('the agent rejected the request');
+  });
+});
+
+describe('#66 part 3: "Not confirmed" is settled by the re-read', () => {
+  /** An authorize or revoke left unconfirmed by a drop, then reconnected. */
+  async function unconfirmedThenReconnect(
+    action: 'authorize' | 'revoke',
+    listing: DirectoryListing,
+    roots: RootList,
+    path: string,
+  ) {
+    const { agent, picker } = await opened(listing, roots);
+    if (action === 'authorize') picker.authorize();
+    else picker.revoke(path);
+    picker.setOnline(false);
+    expect(picker.current().outcome?.kind).toBe('unconfirmed');
+    picker.setOnline(true);
+    agent.next('GET', '/api/directories').answer(json(200, listing));
+    return { agent, picker };
+  }
+
+  it('authorize, re-read lists it: settled as authorized', async () => {
+    const { agent, picker } = await unconfirmedThenReconnect(
+      'authorize',
+      app,
+      noRoots,
+      app.path,
+    );
+    agent.next('GET', '/api/roots').answer(json(200, { roots: [appRoot] }));
+    await agent.settle();
+    const html = render(picker);
+    const outcome = element(html, 'data-outcome="settled"');
+    expect(outcome).toBe(
+      '/home/user/app is authorized, as confirmed by the list of authorized directories the agent returned.',
+    );
+    expect(text(html)).not.toContain('Not confirmed');
+    expect(announced(html)).toBe(outcome);
+  });
+
+  it('authorize, re-read does not list it: not in the list the agent returned', async () => {
+    const { agent, picker } = await unconfirmedThenReconnect(
+      'authorize',
+      app,
+      noRoots,
+      app.path,
+    );
+    agent.next('GET', '/api/roots').answer(json(200, noRoots));
+    await agent.settle();
+    const html = render(picker);
+    const outcome = element(html, 'data-outcome="settled"');
+    expect(outcome).toBe(
+      'Not authorized by that path: /home/user/app is not in the list of authorized directories the agent returned.',
+    );
+    expect(text(html)).not.toContain('Not confirmed');
+    expect(announced(html)).toBe(outcome);
+  });
+
+  it('revoke, re-read no longer lists it: settled as revoked', async () => {
+    const { agent, picker } = await unconfirmedThenReconnect(
+      'revoke',
+      topOfHome,
+      someRoots,
+      '/home/user/code/app',
+    );
+    agent.next('GET', '/api/roots').answer(json(200, noRoots));
+    await agent.settle();
+    const html = render(picker);
+    const outcome = element(html, 'data-outcome="settled"');
+    expect(outcome).toContain(
+      '/home/user/code/app is revoked: the list of authorized directories the agent returned no longer has it.',
+    );
+    expect(text(html)).not.toContain('Not confirmed');
+    expect(announced(html)).toBe(outcome);
+  });
+
+  it('revoke, re-read still lists it: settled as still authorized', async () => {
+    const { agent, picker } = await unconfirmedThenReconnect(
+      'revoke',
+      topOfHome,
+      someRoots,
+      '/home/user/code/app',
+    );
+    agent.next('GET', '/api/roots').answer(json(200, someRoots));
+    await agent.settle();
+    const html = render(picker);
+    const outcome = element(html, 'data-outcome="settled"');
+    expect(outcome).toBe(
+      '/home/user/code/app is still authorized: the list of authorized directories the agent returned still has it.',
+    );
+    expect(announced(html)).toBe(outcome);
+  });
+
+  it.each(problemKinds)(
+    'a %s re-read leaves "Not confirmed" until a roots read succeeds',
+    async (kind) => {
+      const { agent, picker } = await unconfirmedThenReconnect(
+        'authorize',
+        app,
+        noRoots,
+        app.path,
+      );
+      answerWith[kind](agent.next('GET', '/api/roots'));
+      await agent.settle();
+      let html = render(picker);
+      expect(element(html, 'data-reason="dropped"')).toContain(
+        'Not confirmed: the connection went before the agent answered',
+      );
+      if (kind !== 'rejected') {
+        picker.refresh();
+        agent.next('GET', '/api/directories').answer(json(200, app));
+        agent.next('GET', '/api/roots').answer(json(200, { roots: [appRoot] }));
+        await agent.settle();
+        html = render(picker);
+        expect(html).toContain('data-outcome="settled"');
+        expect(text(html)).not.toContain('Not confirmed');
+      }
+    },
+  );
+
+  it.each(problemKinds)(
+    'a %s roots re-read is not cleared by the directory re-read landing after it',
+    async (kind) => {
+      const { agent, picker } = await opened(app, noRoots);
+      picker.authorize();
+      picker.setOnline(false);
+      agent.next('POST', '/api/roots').drop();
+      picker.setOnline(true);
+      // The roots read fails first, then the directory read succeeds.
+      answerWith[kind](agent.next('GET', '/api/roots'));
+      await agent.settle();
+      agent.next('GET', '/api/directories').answer(json(200, app));
+      await agent.settle();
+      expect(agent.pending()).toHaveLength(0);
+      const html = render(picker);
+      expect(picker.current().problem?.kind).toBe(kind);
+      expect(element(html, 'data-stale="true"')).toContain(staleCause[kind]);
+      expect(text(html)).toContain(
+        'Authorized project directories (last known)',
+      );
+      expect(isDisabled(button(html, 'Authorize this directory'))).toBe(true);
+      expect(text(html)).toContain('Not confirmed');
+    },
+  );
+
+  it('the settled sentence stays in the live region when the directory re-read lands after it', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.authorize();
+    answerWith.failed(agent.next('POST', '/api/roots'));
+    await agent.settle();
+    picker.refresh();
+    agent.next('GET', '/api/roots').answer(json(200, { roots: [appRoot] }));
+    await agent.settle();
+    agent.next('GET', '/api/directories').answer(json(200, app));
+    await agent.settle();
+    const html = render(picker);
+    const outcome = element(html, 'data-outcome="settled"');
+    expect(announced(html)).toContain(outcome);
+    expect(announced(html)).toContain('Listed /home/user/app');
+  });
+
+  it('an unreadable authorize with the channel up is settled by Try again', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.authorize();
+    answerWith.failed(agent.next('POST', '/api/roots'));
+    await agent.settle();
+    expect(text(render(picker))).toContain('Not confirmed');
+    picker.refresh();
+    agent.next('GET', '/api/directories').answer(json(200, app));
+    agent.next('GET', '/api/roots').answer(json(200, noRoots));
+    await agent.settle();
+    expect(element(render(picker), 'data-outcome="settled"')).toContain(
+      'Not authorized by that path',
+    );
+  });
+
+  it('a new authorize before the re-read lands replaces the old outcome, and the late re-read brings nothing back', async () => {
+    const { agent, picker } = await opened(app, someRoots);
+    picker.authorize();
+    picker.setOnline(false);
+    agent.next('POST', '/api/roots').drop();
+    picker.setOnline(true);
+    agent.next('GET', '/api/directories').answer(json(200, app));
+    await agent.settle();
+    const lateRoots = agent.next('GET', '/api/roots');
+    // Online, no problem: the user authorizes again before the re-read lands.
+    picker.authorize();
+    answerWith.unreachable(agent.next('POST', '/api/roots'));
+    await agent.settle();
+    expect(picker.current().outcome).toMatchObject({
+      kind: 'unconfirmed',
+      reason: { kind: 'unreachable' },
+    });
+    lateRoots.answer(json(200, { roots: [...someRoots.roots, appRoot] }));
+    await agent.settle();
+    // The read started before the new outcome: it does not settle it.
+    expect(picker.current().outcome).toMatchObject({
+      kind: 'unconfirmed',
+      reason: { kind: 'unreachable' },
+    });
+    expect(text(render(picker))).not.toContain('is authorized, as confirmed');
+  });
+
+  it('a revoke started before the re-read lands is not overwritten by a message about the old path', async () => {
+    const { agent, picker } = await opened(app, someRoots);
+    picker.authorize();
+    picker.setOnline(false);
+    picker.setOnline(true);
+    agent.next('GET', '/api/directories').answer(json(200, app));
+    await agent.settle();
+    const lateRoots = agent.next('GET', '/api/roots');
+    picker.revoke('/home/user/code/app');
+    agent
+      .next('DELETE', '/api/roots')
+      .answer(json(200, { roots: [someRoots.roots[1]] }));
+    await agent.settle();
+    lateRoots.answer(json(200, { roots: [appRoot] }));
+    await agent.settle();
+    expect(picker.current().outcome).toEqual({
+      kind: 'revoked',
+      path: '/home/user/code/app',
+    });
+    expect(text(render(picker))).not.toContain('/home/user/app is');
+  });
+});
+
+describe('#66 part 4: no Authorize for a directory that is gone', () => {
+  it.each(directoryKinds)(
+    'a %s on the reconnect re-read of the listed directory disables Authorize and says why',
+    async (kind) => {
+      const { agent, picker } = await opened(app, noRoots);
+      picker.setOnline(false);
+      picker.setOnline(true);
+      agent.next('GET', '/api/directories').answer(
+        json(directoryStatus[kind], {
+          error: kind,
+          message: directoryMessages[kind],
+        }),
+      );
+      agent.next('GET', '/api/roots').answer(json(200, noRoots));
+      await agent.settle();
+      const html = render(picker);
+      const authorize = button(html, 'Authorize this directory');
+      expect(isDisabled(authorize)).toBe(true);
+      const gone = element(html, `data-gone="${kind}"`);
+      expect(gone).toBe(
+        `/home/user/app could not be listed just now: ${directoryErrorWords[kind].title}. Open a directory that can be listed to authorize it.`,
+      );
+      // Read with the control, not only next to it.
+      const describedBy = /aria-describedby="([^"]+)"/.exec(authorize)?.[1];
+      expect(html).toContain(`<p id="${describedBy}" class="picker-gone"`);
+      expect(element(html, 'data-still-showing="stale"')).toBe(
+        'Still showing /home/user/app as it was listed before this failure: it could not be listed again, so the entries below may no longer be there.',
+      );
+      expect(picker.current().announcement).toContain(gone);
+    },
+  );
+
+  it('Try again and reopening fail the same way, and listing it again enables Authorize', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    const notFound = () =>
+      json(404, { error: 'notFound', message: directoryMessages.notFound });
+    picker.refresh();
+    agent.next('GET', '/api/directories').answer(notFound());
+    agent.next('GET', '/api/roots').answer(json(200, noRoots));
+    await agent.settle();
+    expect(isDisabled(button(render(picker), 'Authorize this directory'))).toBe(
+      true,
+    );
+    // Home works from here, and coming back to the recreated directory
+    // enables Authorize again.
+    picker.home();
+    agent.next('GET', '/api/directories').answer(json(200, topOfHome));
+    await agent.settle();
+    picker.open('/home/user/app');
+    agent.next('GET', '/api/directories').answer(notFound());
+    await agent.settle();
+    // Home was listed, then the open of app failed: home is still listed and
+    // a failed browse of a different path does not disable it.
+    expect(picker.current().listing?.path).toBe('/home/user');
+    picker.open('/home/user/app');
+    agent.next('GET', '/api/directories').answer(json(200, app));
+    await agent.settle();
+    const html = render(picker);
+    expect(isDisabled(button(html, 'Authorize this directory'))).toBe(false);
+    expect(html).not.toContain('data-gone');
+  });
+
+  it('a failed browse of a different path does not disable Authorize for the listed directory', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.open('/home/user/app/locked');
+    agent.next('GET', '/api/directories').answer(
+      json(403, {
+        error: 'unreadable',
+        message: directoryMessages.unreadable,
+      }),
+    );
+    await agent.settle();
+    const html = render(picker);
+    expect(isDisabled(button(html, 'Authorize this directory'))).toBe(false);
+    expect(html).not.toContain('data-gone');
+    expect(element(html, 'data-still-showing="current"')).toBe(
+      'Still showing /home/user/app.',
+    );
+  });
+
+  it('a different path failing afterwards does not re-enable Authorize for the gone one', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.refresh();
+    agent
+      .next('GET', '/api/directories')
+      .answer(
+        json(404, { error: 'notFound', message: directoryMessages.notFound }),
+      );
+    agent.next('GET', '/api/roots').answer(json(200, noRoots));
+    await agent.settle();
+    picker.open('/typo');
+    agent
+      .next('GET', '/api/directories')
+      .answer(
+        json(404, { error: 'notFound', message: directoryMessages.notFound }),
+      );
+    await agent.settle();
+    expect(isDisabled(button(render(picker), 'Authorize this directory'))).toBe(
+      true,
+    );
+  });
+
+  it('a gone authorized root is listed as the agent says, with Revoke enabled, and other roots still open', async () => {
+    const gone = {
+      ...topOfHome,
+      path: '/home/user/code/gone',
+      parent: '/home/user/code',
+    };
+    const { agent, picker } = await opened(gone, {
+      roots: [{ path: '/home/user/code/gone', available: true }, appRoot],
+    });
+    picker.setOnline(false);
+    picker.setOnline(true);
+    agent
+      .next('GET', '/api/directories')
+      .answer(
+        json(404, { error: 'notFound', message: directoryMessages.notFound }),
+      );
+    agent.next('GET', '/api/roots').answer(json(200, someRoots));
+    await agent.settle();
+    const html = render(picker);
+    expect(text(html)).toContain(
+      '/home/user/code/gone unavailable: it no longer exists',
+    );
+    expect(isDisabled(button(html, 'Revoke /home/user/code/gone'))).toBe(false);
+    expect(isDisabled(button(html, 'Authorize this directory'))).toBe(true);
+    picker.open('/home/user/code/app');
+    expect(agent.next('GET', '/api/directories').queryPath).toBe(
+      '/home/user/code/app',
+    );
+  });
+});
+
+describe('#66 edge cases', () => {
+  it('two tabs: authorized elsewhere while this one was unconfirmed is shown as authorized, claiming nothing about who did it', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.authorize();
+    const post = agent.next('POST', '/api/roots');
+    picker.setOnline(false);
+    post.drop();
+    picker.setOnline(true);
+    agent.next('GET', '/api/directories').answer(json(200, app));
+    agent.next('GET', '/api/roots').answer(json(200, { roots: [appRoot] }));
+    await agent.settle();
+    const outcome = element(render(picker), 'data-outcome="settled"');
+    expect(outcome).toContain('/home/user/app is authorized');
+    expect(outcome).not.toMatch(/this (tab|page|request)|you /i);
+  });
+
+  it('symlink: an unconfirmed …/link is not claimed authorized when the list has …/real', async () => {
+    const link = {
+      ...topOfHome,
+      path: '/home/user/link',
+      parent: '/home/user',
+    };
+    const { agent, picker } = await opened(link, noRoots);
+    picker.authorize();
+    picker.setOnline(false);
+    picker.setOnline(true);
+    agent.next('GET', '/api/directories').answer(json(200, link));
+    agent
+      .next('GET', '/api/roots')
+      .answer(
+        json(200, { roots: [{ path: '/home/user/real', available: true }] }),
+      );
+    await agent.settle();
+    const html = render(picker);
+    const outcome = element(html, 'data-outcome="settled"');
+    expect(outcome).toBe(
+      'Not authorized by that path: /home/user/link is not in the list of authorized directories the agent returned.',
+    );
+    expect(text(html)).toContain('/home/user/real available');
+  });
+
+  it('problem, then drop, then back: the reconnect re-read decides', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.open('/home/user/x');
+    answerWith.rejected(agent.next('GET', '/api/directories'));
+    await agent.settle();
+    picker.setOnline(false);
+    picker.setOnline(true);
+    agent.next('GET', '/api/directories').answer(json(200, app));
+    agent.next('GET', '/api/roots').answer(json(200, noRoots));
+    await agent.settle();
+    const html = render(picker);
+    expect(picker.current().problem).toBeNull();
+    expect(html).not.toContain('data-stale');
+    expect(isDisabled(button(html, 'Authorize this directory'))).toBe(false);
+  });
+
+  it('latest wins: late answers from before a drop change neither the note, the outcome nor Authorize', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.open('/home/user/app');
+    const lateBrowse = agent.next('GET', '/api/directories');
+    picker.setOnline(false);
+    picker.setOnline(true);
+    const again = agent.next('GET', '/api/directories');
+    again.answer(json(200, app));
+    agent.next('GET', '/api/roots').answer(json(200, noRoots));
+    await agent.settle();
+    lateBrowse.answer(
+      json(404, { error: 'notFound', message: directoryMessages.notFound }),
+    );
+    await agent.settle();
+    let html = render(picker);
+    expect(isDisabled(button(html, 'Authorize this directory'))).toBe(false);
+    expect(html).not.toContain('data-stale');
+    // And a late problem from a superseded browse adds no note.
+    picker.open('/home/user/a');
+    const older = agent.next('GET', '/api/directories');
+    picker.open('/home/user/app');
+    const newer = agent
+      .pending()
+      .filter((r) => r.path === '/api/directories')[1];
+    if (newer === undefined) throw new Error('two browses');
+    newer.answer(json(200, app));
+    answerWith.rejected(older);
+    await agent.settle();
+    html = render(picker);
+    expect(html).not.toContain('data-stale');
+    expect(picker.current().outcome).toBeNull();
+  });
+
+  it('no new state relies on colour: each is words, in the live region or the control description', async () => {
+    const { agent, picker } = await opened(app, noRoots);
+    picker.authorize();
+    answerWith.rejected(agent.next('POST', '/api/roots'));
+    await agent.settle();
+    const html = render(picker);
+    expect(announced(html)).toContain('the agent rejected the request');
   });
 });

@@ -30,16 +30,24 @@ import {
   canChangeRoots,
   createPickerController,
   isLastKnown,
+  listingGone,
   rootAt,
   type PickerController,
   type PickerState,
+  type RootsAction,
+  type RootsOutcome,
 } from './controller.ts';
 import { listKeyAction, rovingIndex } from './keyboard.ts';
 import {
   directoryErrorWords,
   entryFacts,
+  listingGoneNote,
+  pickerProblemScope,
   revokeNote,
   rootsErrorWords,
+  rootsOutcomeSentence,
+  staleListingNote,
+  staleNote,
   truncationNote,
   unavailableWords,
 } from './words.ts';
@@ -112,10 +120,16 @@ export function PickerView(props: {
         <p className="muted">Waiting for the agent.</p>
       )}
       {lastKnown && (state.listing !== null || state.roots !== null) ? (
-        <p className="picker-stale" data-stale="true">
-          Last known, not current: the agent is not connected, so what is shown
-          here may be out of date. Authorizing and revoking are off until it is
-          back, and both lists are read again then.
+        <p
+          className="picker-stale"
+          data-stale="true"
+          data-cause={
+            !state.online || state.problem === null
+              ? 'disconnected'
+              : state.problem.kind
+          }
+        >
+          {staleNote(state.online, state.problem)}
         </p>
       ) : null}
       <Location
@@ -146,8 +160,9 @@ function ProblemNotice(props: { state: PickerState; actions: PickerActions }) {
           : state.problem.kind
       }
     >
-      <h3>{description.label}</h3>
+      <h3>The picker’s last request: {description.label}</h3>
       <p>{description.detail}</p>
+      <p>{pickerProblemScope}</p>
       {state.problem.kind === 'rejected' ? null : (
         <button type="button" onClick={() => actions.refresh()}>
           Try again
@@ -277,8 +292,14 @@ function BrowseError(props: { state: PickerState }) {
       <p>
         The agent said: <q>{failure.error.message}</q>
       </p>
-      {props.state.listing === null ? null : (
-        <p className="muted">Still showing {props.state.listing.path}.</p>
+      {props.state.listing === null ? null : listingGone(props.state) ? (
+        <p className="muted" data-still-showing="stale">
+          {staleListingNote(props.state.listing.path)}
+        </p>
+      ) : (
+        <p className="muted" data-still-showing="current">
+          Still showing {props.state.listing.path}.
+        </p>
       )}
     </div>
   );
@@ -317,7 +338,10 @@ function Authorize(props: {
   const existing = rootAt(state, listing.path);
   const already = existing?.available === true;
   const inFlight = state.busy?.action === 'authorize';
-  const enabled = !already && canChangeRoots(state);
+  // The listed directory could not be listed again: the agent would refuse it.
+  const gone = listingGone(state) ? state.listingFailure : null;
+  const enabled = !already && gone === null && canChangeRoots(state);
+  const goneId = useId();
   let label = 'Authorize this directory';
   if (already) {
     label = 'Already authorized';
@@ -329,10 +353,16 @@ function Authorize(props: {
       <button
         type="button"
         disabled={!enabled}
+        aria-describedby={gone === null ? undefined : goneId}
         onClick={() => actions.authorize()}
       >
         {label}
       </button>
+      {gone === null ? null : (
+        <p id={goneId} className="picker-gone" data-gone={gone.error.error}>
+          {listingGoneNote(listing.path, gone.error.error)}
+        </p>
+      )}
       <AuthorizeOutcome state={state} actions={actions} />
     </div>
   );
@@ -354,14 +384,8 @@ function AuthorizeOutcome(props: {
       </p>
     );
   }
-  if (outcome.kind === 'unconfirmed' && outcome.action === 'authorize') {
-    return (
-      <p className="picker-outcome" data-outcome="unconfirmed">
-        Not confirmed: the connection went before the agent answered, so{' '}
-        {outcome.path} is not known to be authorized. The list is read again
-        from the agent once it is back.
-      </p>
-    );
+  if (isSentenceOutcome(outcome, 'authorize')) {
+    return <SentenceOutcome outcome={outcome} />;
   }
   if (outcome.kind !== 'refused' || outcome.action !== 'authorize') {
     return null;
@@ -398,6 +422,40 @@ function AuthorizeOutcome(props: {
         </div>
       ) : null}
     </div>
+  );
+}
+
+type SentenceOutcomeKind = Extract<
+  RootsOutcome,
+  { kind: 'rejected' | 'unconfirmed' | 'settled' }
+>;
+
+/** An outcome said in one sentence, the one the live region also reads. */
+function isSentenceOutcome(
+  outcome: RootsOutcome,
+  action: RootsAction,
+): outcome is SentenceOutcomeKind {
+  return (
+    (outcome.kind === 'rejected' ||
+      outcome.kind === 'unconfirmed' ||
+      outcome.kind === 'settled') &&
+    outcome.action === action
+  );
+}
+
+function SentenceOutcome(props: { outcome: SentenceOutcomeKind }) {
+  const { outcome } = props;
+  return (
+    <p
+      className="picker-outcome"
+      data-outcome={outcome.kind}
+      data-reason={
+        outcome.kind === 'unconfirmed' ? outcome.reason.kind : undefined
+      }
+      data-listed={outcome.kind === 'settled' ? outcome.listed : undefined}
+    >
+      {rootsOutcomeSentence(outcome)}
+    </p>
   );
 }
 
@@ -546,12 +604,8 @@ function Roots(props: {
           on disk was deleted.
         </p>
       ) : null}
-      {outcome?.kind === 'unconfirmed' && outcome.action === 'revoke' ? (
-        <p className="picker-outcome" data-outcome="unconfirmed">
-          Not confirmed: the connection went before the agent answered, so{' '}
-          {outcome.path} is not known to be revoked. The list is read again from
-          the agent once it is back.
-        </p>
+      {outcome !== null && isSentenceOutcome(outcome, 'revoke') ? (
+        <SentenceOutcome outcome={outcome} />
       ) : null}
       {outcome?.kind === 'refused' && outcome.action === 'revoke' ? (
         <div

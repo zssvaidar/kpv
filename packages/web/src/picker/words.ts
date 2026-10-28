@@ -10,6 +10,13 @@ import type {
   RootsErrorKind,
 } from '@kpv/schema';
 
+import type { RequestProblem } from '../connection/describe.ts';
+import type {
+  RootsAction,
+  RootsOutcome,
+  UnconfirmedReason,
+} from './controller.ts';
+
 /** What an entry is, in words, and whether the picker can open it. */
 export interface EntryFacts {
   /** The entry's kind as text, never only an icon or a colour. */
@@ -170,4 +177,107 @@ export function truncationNote(shown: number): string {
     'They are a sample in the order the filesystem returned them, sorted by name, ' +
     'not the alphabetical start of the directory. To reach one that is not shown, type its path.'
   );
+}
+
+/**
+ * Why what is shown is only the last known state. While the channel is down
+ * it is the connection; while it is up, it is only the picker's own last
+ * request, which the status bar does not follow (#66).
+ */
+export function staleNote(online: boolean, problem: RequestProblem | null) {
+  if (!online || problem === null) {
+    return (
+      'Last known, not current: the agent is not connected, so what is shown ' +
+      'here may be out of date. Authorizing and revoking are off until it is ' +
+      'back, and both lists are read again then.'
+    );
+  }
+  let cause: string;
+  switch (problem.kind) {
+    case 'rejected':
+      cause = 'the agent rejected the picker’s last request';
+      break;
+    case 'unreachable':
+      cause = 'the agent did not answer the picker’s last request';
+      break;
+    case 'failed':
+      cause = 'the agent’s last answer to the picker could not be read';
+      break;
+  }
+  return (
+    `Last known, not current: ${cause}, so what is shown here may be out of ` +
+    'date. Authorizing and revoking are off until a request from the picker ' +
+    'succeeds again.'
+  );
+}
+
+/** Says that a request problem is the picker's, not the connection's. */
+export const pickerProblemScope =
+  'This is about the directory picker’s last request only, not the whole ' +
+  'connection: the status bar shows the connection to the agent, which this ' +
+  'does not change.';
+
+/** Why Authorize is off for a listed directory that could not be listed again. */
+export function listingGoneNote(path: string, kind: DirectoryErrorKind) {
+  return (
+    `${path} could not be listed just now: ${directoryErrorWords[kind].title}. ` +
+    'Open a directory that can be listed to authorize it.'
+  );
+}
+
+/** What "Still showing" says when the listed directory's own browse failed. */
+export function staleListingNote(path: string) {
+  return (
+    `Still showing ${path} as it was listed before this failure: it could ` +
+    'not be listed again, so the entries below may no longer be there.'
+  );
+}
+
+/**
+ * The sentence shown, and announced, for an authorize or revoke that was
+ * rejected, not answered readably, or settled afterwards by the roots list.
+ * The other outcomes have their own markup.
+ */
+export function rootsOutcomeSentence(outcome: RootsOutcome): string {
+  switch (outcome.kind) {
+    case 'rejected':
+      return outcome.action === 'authorize'
+        ? `Not authorized: the agent rejected the request, so ${outcome.path} was not authorized. Nothing was changed on the agent.`
+        : `Not revoked: the agent rejected the request, so ${outcome.path} was not revoked. Nothing was changed on the agent.`;
+    case 'unconfirmed':
+      return unconfirmedSentence(outcome.action, outcome.path, outcome.reason);
+    case 'settled':
+      if (outcome.action === 'authorize') {
+        return outcome.listed
+          ? `${outcome.path} is authorized, as confirmed by the list of authorized directories the agent returned.`
+          : `Not authorized by that path: ${outcome.path} is not in the list of authorized directories the agent returned.`;
+      }
+      return outcome.listed
+        ? `${outcome.path} is still authorized: the list of authorized directories the agent returned still has it.`
+        : `${outcome.path} is revoked: the list of authorized directories the agent returned no longer has it. Nothing on disk was deleted.`;
+    case 'authorized':
+      return `Authorized ${outcome.path}.`;
+    case 'revoked':
+      return `Revoked ${outcome.path}. Nothing on disk was deleted.`;
+    case 'refused':
+      return `${outcome.action === 'authorize' ? 'Not authorized' : 'Not revoked'}. ${rootsErrorWords[outcome.error.error].title}. ${outcome.error.message}`;
+  }
+}
+
+function unconfirmedSentence(
+  action: RootsAction,
+  path: string,
+  reason: UnconfirmedReason,
+): string {
+  const done = action === 'authorize' ? 'authorized' : 'revoked';
+  const settles =
+    'The list of authorized directories settles it once it is read again: Try again reads it.';
+  switch (reason.kind) {
+    case 'dropped':
+      return `Not confirmed: the connection went before the agent answered, so ${path} is not known to be ${done}. The list is read again from the agent once it is back.`;
+    case 'unreachable':
+      return `Not confirmed: the agent did not answer, so it is not known whether ${path} was ${done}. ${settles}`;
+    case 'failed':
+      return `Not confirmed: the agent answered with HTTP ${reason.status}, but the answer could not be read, so it is not known whether ${path} was ${done}. ${settles}`;
+  }
 }
