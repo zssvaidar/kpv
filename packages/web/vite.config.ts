@@ -24,6 +24,22 @@ export default defineConfig({
     // the policy is a response header as well: no request the page makes
     // carries that URL as a Referer. The agent serving the page is #55.
     headers: { 'Referrer-Policy': 'no-referrer' },
+    // No CORS from the dev server, for anything (#65). Vite's CORS middleware
+    // allows localhost and 127.0.0.1 origins by default and is installed
+    // ahead of every plugin's middleware, so left on it answered a preflight
+    // for `/api` with 204 and an allow header before the agent proxy
+    // (dev/agent-proxy.ts) saw it, and added Access-Control-Allow-Origin to
+    // the agent's own rejections. Dev traffic is one origin (#8): the page and
+    // `/api` both come from here, so nothing the page needs is cross-origin.
+    // The HMR client connects from the same origin too, and nothing else in
+    // this setup needs CORS. dev/cors.test.ts fails if this is turned back on.
+    cors: false,
+  },
+  // `vite preview` has its own switch. No script runs it today; if one is
+  // added it answers no CORS either, and has to meet #65's criteria the same
+  // way.
+  preview: {
+    cors: false,
   },
   build: {
     outDir: 'dist',

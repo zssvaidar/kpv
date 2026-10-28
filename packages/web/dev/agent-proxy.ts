@@ -232,7 +232,15 @@ export function agentProxy(agentOrigin: string): Plugin {
     configureServer(server: ViteDevServer) {
       const httpServer = server.httpServer as Server | null;
       // Registered directly rather than returned, so it runs ahead of Vite's
-      // own middlewares and nothing of Vite's answers for `/api`.
+      // own middlewares (transforms, static files, the SPA fallback). Vite
+      // installs three things ahead of any plugin: a check that rejects a
+      // malformed request, its `allowedHosts` check, which answers `403` to
+      // a `Host` that is not a local name, and CORS. CORS is off in
+      // vite.config.ts (#65), since it answered preflights for `/api` with
+      // `204` and an allow header. So for a well-formed request to a local
+      // `Host`, nothing of Vite's answers for `/api`: every such request, a
+      // preflight included, goes to the agent and comes back as the agent
+      // answered it, or the connection is dropped if the agent is gone.
       server.middlewares.use((req, res, next) => {
         if (!isAgentPath(req.url)) {
           next();
