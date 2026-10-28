@@ -71,6 +71,9 @@ const everyRequest: [string, (api: AgentClient) => Promise<unknown>][] = [
     'listDirectories with a query',
     (api) => api.listDirectories({ path: '/tmp', limit: 5 }),
   ],
+  ['listRoots', (api) => api.listRoots()],
+  ['authorizeRoot', (api) => api.authorizeRoot('/home/user/code')],
+  ['revokeRoot', (api) => api.revokeRoot('/home/user/code')],
 ];
 
 describe('createAgentClient', () => {
@@ -94,9 +97,12 @@ describe('createAgentClient', () => {
   it('exposes nothing but the typed calls, so no caller can send its own request', () => {
     const { api } = client(() => json(200, listing));
     expect(Object.keys(api).sort()).toEqual([
+      'authorizeRoot',
       'listDirectories',
+      'listRoots',
       'openChannel',
       'probe',
+      'revokeRoot',
     ]);
   });
 
@@ -185,5 +191,101 @@ describe('createAgentClient', () => {
     expect(url.host).toBe('127.0.0.1:5173');
     expect(url.pathname).toBe('/api/channel');
     expect(url.searchParams.get('token')).toBe(token);
+  });
+});
+
+describe('the roots methods', () => {
+  const roots = {
+    roots: [
+      { path: '/home/user/code/app', available: true },
+      { path: '/home/user/gone', available: false, reason: 'notFound' },
+    ],
+  };
+
+  it('lists the roots with GET /api/roots and the generated schema', async () => {
+    const { api, sent } = client(() => json(200, roots));
+    expect(await api.listRoots()).toEqual({ kind: 'ok', value: roots });
+    const url = new URL(sent[0]?.url ?? '');
+    expect(url.pathname).toBe('/api/roots');
+    expect(url.search).toBe('');
+    expect(sent[0]?.init?.method).toBe('GET');
+    expect(sent[0]?.init?.body).toBeUndefined();
+  });
+
+  it.each([
+    ['authorizeRoot', 'POST', { path: '/home/user/code/app' }],
+    ['revokeRoot', 'DELETE', roots],
+  ] as const)(
+    '%s sends %s with a JSON RootRequest and nothing else',
+    async (method, verb, answer) => {
+      const { api, sent } = client(() => json(200, answer));
+      const result = await api[method]('/home/user/code/app');
+      expect(result).toEqual({ kind: 'ok', value: answer });
+      const url = new URL(sent[0]?.url ?? '');
+      expect(url.origin).toBe(origin);
+      expect(url.pathname).toBe('/api/roots');
+      expect(url.search).toBe('');
+      expect(sent[0]?.init?.method).toBe(verb);
+      const headers = new Headers(sent[0]?.init?.headers);
+      expect(headers.get('Content-Type')).toBe('application/json');
+      expect(headers.get('Authorization')).toBe(`Bearer ${token}`);
+      const body = sent[0]?.init?.body;
+      expect(typeof body).toBe('string');
+      expect(JSON.parse(body as string)).toEqual({
+        path: '/home/user/code/app',
+      });
+    },
+  );
+
+  it("reads a revoke's typed 404 as notFound, not as a rejection", async () => {
+    const notFound = {
+      error: 'notFound',
+      message: 'this path is not an authorized project directory',
+    };
+    const { api } = client(() => json(404, notFound));
+    expect(await api.revokeRoot('/home/user/code/app')).toEqual({
+      kind: 'error',
+      status: 404,
+      error: notFound,
+    });
+  });
+
+  it('reads an overlaps refusal with the root it names', async () => {
+    const overlaps = {
+      error: 'overlaps',
+      message:
+        'this directory is inside, or contains, a project directory that is already authorized',
+      root: '/home/user/code/app',
+    };
+    const { api } = client(() => json(409, overlaps));
+    expect(await api.authorizeRoot('/home/user/code')).toEqual({
+      kind: 'error',
+      status: 409,
+      error: overlaps,
+    });
+  });
+
+  it('reads the uniform rejection, no answer and a bad answer the same way as every other call', async () => {
+    expect(await client(rejection).api.listRoots()).toEqual({
+      kind: 'rejected',
+    });
+    expect(await client(rejection).api.authorizeRoot('/x')).toEqual({
+      kind: 'rejected',
+    });
+    expect(
+      await client(() =>
+        Promise.reject(new TypeError('Failed to fetch')),
+      ).api.revokeRoot('/x'),
+    ).toEqual({ kind: 'unreachable' });
+    expect(
+      await client(() =>
+        json(200, { roots: [{ path: '/x' }] }),
+      ).api.listRoots(),
+    ).toEqual({ kind: 'failed', status: 200 });
+    expect(
+      await client(() =>
+        json(200, { path: '/x', available: true }),
+      ).api.authorizeRoot('/x'),
+    ).toEqual({ kind: 'failed', status: 200 });
   });
 });

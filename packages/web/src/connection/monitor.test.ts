@@ -59,6 +59,9 @@ function setup(probes: AgentResult<null>[]) {
       return Promise.resolve(probes.shift() ?? { kind: 'unreachable' });
     },
     listDirectories: () => Promise.reject(new Error('not used')),
+    listRoots: () => Promise.reject(new Error('not used')),
+    authorizeRoot: () => Promise.reject(new Error('not used')),
+    revokeRoot: () => Promise.reject(new Error('not used')),
     openChannel: () => {
       const socket = new FakeSocket();
       sockets.push(socket);

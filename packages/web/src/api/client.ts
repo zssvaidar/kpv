@@ -29,8 +29,20 @@
 // client does not try: it keys on the status and on the endpoint's own error
 // shape, never on the wording of either 404's body.
 
-import type { DirectoryError, DirectoryListing } from '@kpv/schema';
-import { directoryErrorSchema, directoryListingSchema } from '@kpv/schema';
+import type {
+  AuthorizedRoot,
+  DirectoryError,
+  DirectoryListing,
+  RootList,
+  RootsError,
+} from '@kpv/schema';
+import {
+  authorizedRootSchema,
+  directoryErrorSchema,
+  directoryListingSchema,
+  rootListSchema,
+  rootsErrorSchema,
+} from '@kpv/schema';
 
 /**
  * What the client needs of a generated Zod schema: to parse an answer. The
@@ -88,9 +100,24 @@ export interface AgentClient {
   listDirectories(
     query?: DirectoryQuery,
   ): Promise<AgentResult<DirectoryListing, DirectoryError>>;
+  /** The authorized project roots: `GET /api/roots` (#63). */
+  listRoots(): Promise<AgentResult<RootList, RootsError>>;
+  /**
+   * Authorizes a directory as a project root: `POST /api/roots` (#63). The
+   * answer is the real path that was authorized.
+   */
+  authorizeRoot(path: string): Promise<AgentResult<AuthorizedRoot, RootsError>>;
+  /**
+   * Revokes a project root: `DELETE /api/roots` (#63). The answer is the set
+   * of roots left. Nothing on disk is touched.
+   */
+  revokeRoot(path: string): Promise<AgentResult<RootList, RootsError>>;
   /** Opens the push channel: `GET /api/channel` (#5), the token in the URL. */
   openChannel(): WebSocket;
 }
+
+/** The methods that send something; the body of each is a RootRequest. */
+type Method = 'GET' | 'POST' | 'DELETE';
 
 /** The environment of the page this runs in. */
 export function browserEnvironment(): ClientEnvironment {
@@ -107,12 +134,26 @@ export function createAgentClient(
   environment: ClientEnvironment,
 ): AgentClient {
   // The one function that sends a request. The token goes in a header rather
-  // than the URL, so it is not in any URL a request was made to.
-  async function send(path: string): Promise<Response | undefined> {
+  // than the URL, so it is not in any URL a request was made to. A request
+  // with a body is the roots routes' JSON RootRequest (#63), which the agent
+  // takes only as application/json; the browser adds the page's Origin to a
+  // POST or DELETE itself, which those routes require.
+  async function send(
+    path: string,
+    method: Method = 'GET',
+    body?: { path: string },
+  ): Promise<Response | undefined> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+    };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
     try {
       return await environment.fetch(new URL(path, environment.origin), {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
+        method,
+        headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         credentials: 'omit',
         cache: 'no-store',
         redirect: 'error',
@@ -126,8 +167,10 @@ export function createAgentClient(
     path: string,
     value: Parser<T>,
     error: Parser<E> | undefined,
+    method: Method = 'GET',
+    request?: { path: string },
   ): Promise<AgentResult<T, E>> {
-    const answer = await send(path);
+    const answer = await send(path, method, request);
     if (answer === undefined) {
       return { kind: 'unreachable' };
     }
@@ -175,6 +218,28 @@ export function createAgentClient(
       return call(`/api/directories${search}`, listingParser, errorParser);
     },
 
+    listRoots() {
+      return call('/api/roots', rootListParser, rootsErrorParser);
+    },
+
+    authorizeRoot(path) {
+      return call(
+        '/api/roots',
+        authorizedRootParser,
+        rootsErrorParser,
+        'POST',
+        {
+          path,
+        },
+      );
+    },
+
+    revokeRoot(path) {
+      return call('/api/roots', rootListParser, rootsErrorParser, 'DELETE', {
+        path,
+      });
+    },
+
     openChannel() {
       const url = new URL('/api/channel', environment.origin);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -192,10 +257,16 @@ export function createAgentClient(
 // against `parent?: string`), so it is asserted rather than assigned. Both are
 // generated from schema/directory.schema.json, and a parse succeeds only on a
 // value that schema accepts, which never has a key set to undefined. The
-// error's schema has no optional field and is assigned unasserted.
+// error's schema has no optional field and is assigned unasserted. The roots
+// answers are the same: a root's reason and a roots error's root are
+// optional, so those two are asserted for the same reason, from
+// schema/roots.schema.json.
 const listingParser =
   directoryListingSchema as unknown as Parser<DirectoryListing>;
 const errorParser: Parser<DirectoryError> = directoryErrorSchema;
+const rootListParser = rootListSchema as unknown as Parser<RootList>;
+const authorizedRootParser: Parser<AuthorizedRoot> = authorizedRootSchema;
+const rootsErrorParser = rootsErrorSchema as unknown as Parser<RootsError>;
 
 async function readJSON(answer: Response): Promise<unknown> {
   try {
