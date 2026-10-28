@@ -8,6 +8,7 @@
     "jsx": "react-jsx",
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
       "@kpv/schema": ["../schema/src/index.ts"]

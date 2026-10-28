@@ -1,12 +1,15 @@
 // The layout shell: a status bar, then the three regions every later screen
 // fills in -- the graph area (#9), the side panel (#12, #13) and the bottom
-// panel. Layout only; nothing in it knows about a pipeline yet.
+// panel. When it is handed a pipeline the graph area draws it (#9) and the
+// side panel shows which block is selected in it; nothing opens one yet.
 //
 // The connection state is in the status bar on every screen, and when there
 // is no working connection the graph area says why in words, so a dead or
 // refusing agent never looks like an empty screen.
 
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+
+import type { Pipeline } from '@kpv/schema';
 
 import type { AgentClient } from '../api/client.ts';
 import { describeConnection } from '../connection/describe.ts';
@@ -14,6 +17,8 @@ import type {
   ConnectionMonitor,
   ConnectionState,
 } from '../connection/monitor.ts';
+import { PipelineGraph } from '../graph/PipelineGraph.tsx';
+import { SelectionSummary } from '../graph/SelectionSummary.tsx';
 import { DirectoryPicker } from '../picker/DirectoryPicker.tsx';
 
 export function App(props: {
@@ -33,8 +38,20 @@ export function App(props: {
 export function Shell(props: {
   state: ConnectionState;
   client: AgentClient | null;
+  pipeline?: Pipeline | null;
 }) {
   const { state, client } = props;
+  const pipeline = props.pipeline ?? null;
+  // The selected node, owned here so the side panel can read it. It belongs
+  // to the pipeline it was made in, so another pipeline starts unselected.
+  const [selection, setSelection] = useState<{
+    pipeline: Pipeline;
+    node: string | null;
+  } | null>(null);
+  const selected =
+    selection !== null && selection.pipeline === pipeline
+      ? selection.node
+      : null;
   const description = describeConnection(state);
   const connected = state.status === 'connected';
   return (
@@ -51,7 +68,14 @@ export function Shell(props: {
         </span>
       </header>
       <main className="graph-area" aria-label="Graph area">
-        {connected ? (
+        {connected && pipeline !== null ? (
+          <PipelineGraph
+            key={pipeline.id}
+            pipeline={pipeline}
+            selected={selected}
+            onSelect={(node) => setSelection({ pipeline, node })}
+          />
+        ) : connected ? (
           <p className="muted">No pipeline open.</p>
         ) : (
           <section
@@ -66,6 +90,9 @@ export function Shell(props: {
         )}
       </main>
       <aside className="side-panel" aria-label="Side panel">
+        {pipeline === null ? null : (
+          <SelectionSummary pipeline={pipeline} selected={selected} />
+        )}
         <h2>Project directory</h2>
         <DirectoryPicker client={client} connection={state} />
       </aside>

@@ -1,0 +1,318 @@
+{
+  "id": "long-chain",
+  "language": "python",
+  "source": {
+    "id": "events",
+    "type": "kafkaSource",
+    "topic": "events.v1"
+  },
+  "processingSteps": [
+    {
+      "id": "filter-01",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 1"
+      }
+    },
+    {
+      "id": "transform-02",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "validate-03",
+      "type": "validate",
+      "configuration": {
+        "rules": [
+          {
+            "field": "stage",
+            "required": true,
+            "fieldType": "number"
+          }
+        ],
+        "onInvalid": "drop"
+      }
+    },
+    {
+      "id": "code-04",
+      "type": "customCode",
+      "configuration": {
+        "entrypoint": "step_4"
+      }
+    },
+    {
+      "id": "filter-05",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 5"
+      }
+    },
+    {
+      "id": "transform-06",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 6"
+          }
+        ]
+      }
+    },
+    {
+      "id": "validate-07",
+      "type": "validate",
+      "configuration": {
+        "rules": [
+          {
+            "field": "stage",
+            "required": true,
+            "fieldType": "number"
+          }
+        ],
+        "onInvalid": "drop"
+      }
+    },
+    {
+      "id": "code-08",
+      "type": "customCode",
+      "configuration": {
+        "entrypoint": "step_8"
+      }
+    },
+    {
+      "id": "filter-09",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 9"
+      }
+    },
+    {
+      "id": "transform-10",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 10"
+          }
+        ]
+      }
+    },
+    {
+      "id": "validate-11",
+      "type": "validate",
+      "configuration": {
+        "rules": [
+          {
+            "field": "stage",
+            "required": true,
+            "fieldType": "number"
+          }
+        ],
+        "onInvalid": "drop"
+      }
+    },
+    {
+      "id": "code-12",
+      "type": "customCode",
+      "configuration": {
+        "entrypoint": "step_12"
+      }
+    },
+    {
+      "id": "filter-13",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 13"
+      }
+    },
+    {
+      "id": "transform-14",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 14"
+          }
+        ]
+      }
+    },
+    {
+      "id": "validate-15",
+      "type": "validate",
+      "configuration": {
+        "rules": [
+          {
+            "field": "stage",
+            "required": true,
+            "fieldType": "number"
+          }
+        ],
+        "onInvalid": "drop"
+      }
+    },
+    {
+      "id": "code-16",
+      "type": "customCode",
+      "configuration": {
+        "entrypoint": "step_16"
+      }
+    },
+    {
+      "id": "filter-17",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 17"
+      }
+    },
+    {
+      "id": "transform-18",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 18"
+          }
+        ]
+      }
+    },
+    {
+      "id": "validate-19",
+      "type": "validate",
+      "configuration": {
+        "rules": [
+          {
+            "field": "stage",
+            "required": true,
+            "fieldType": "number"
+          }
+        ],
+        "onInvalid": "drop"
+      }
+    },
+    {
+      "id": "code-20",
+      "type": "customCode",
+      "configuration": {
+        "entrypoint": "step_20"
+      }
+    },
+    {
+      "id": "filter-21",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 21"
+      }
+    },
+    {
+      "id": "transform-22",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 22"
+          }
+        ]
+      }
+    },
+    {
+      "id": "validate-23",
+      "type": "validate",
+      "configuration": {
+        "rules": [
+          {
+            "field": "stage",
+            "required": true,
+            "fieldType": "number"
+          }
+        ],
+        "onInvalid": "drop"
+      }
+    },
+    {
+      "id": "code-24",
+      "type": "customCode",
+      "configuration": {
+        "entrypoint": "step_24"
+      }
+    },
+    {
+      "id": "filter-25",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 25"
+      }
+    },
+    {
+      "id": "transform-26",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 26"
+          }
+        ]
+      }
+    },
+    {
+      "id": "validate-27",
+      "type": "validate",
+      "configuration": {
+        "rules": [
+          {
+            "field": "stage",
+            "required": true,
+            "fieldType": "number"
+          }
+        ],
+        "onInvalid": "drop"
+      }
+    },
+    {
+      "id": "code-28",
+      "type": "customCode",
+      "configuration": {
+        "entrypoint": "step_28"
+      }
+    },
+    {
+      "id": "filter-29",
+      "type": "filter",
+      "configuration": {
+        "expression": "stage == 29"
+      }
+    },
+    {
+      "id": "transform-30",
+      "type": "transform",
+      "configuration": {
+        "mappings": [
+          {
+            "targetField": "stage",
+            "expression": "stage + 30"
+          }
+        ]
+      }
+    }
+  ],
+  "destination": {
+    "id": "archive",
+    "type": "kafkaDestination",
+    "topic": "events.archive.v1"
+  },
+  "runtimeConfiguration": {
+    "networkMode": "docker"
+  }
+}
