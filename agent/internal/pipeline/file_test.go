@@ -1,5 +1,7 @@
-// Reading and writing pipeline.yaml: the round trip, the bytes a write
-// produces, and what every malformed file produces instead of a pipeline.
+// The bytes of pipeline.yaml: the round trip, the bytes a write produces, and
+// what every malformed document produces instead of a pipeline. Reading and
+// writing the file itself is internal/catalog's (#48); these tests put the
+// bytes on disk themselves, through loadFile and saveFile below.
 
 package pipeline_test
 
@@ -16,8 +18,7 @@ import (
 	"github.com/zssvaidar/kpv/agent/internal/pipeline"
 )
 
-// pipelineFile is the name a pipeline file has in these tests. Which directory
-// it lives in is #48, so every test is handed a path of its own.
+// pipelineFile is the name a pipeline file has in these tests.
 const pipelineFile = "pipeline.yaml"
 
 func TestAPipelineRoundTripsFromModelToYAMLAndBack(t *testing.T) {
@@ -29,12 +30,12 @@ func TestAPipelineRoundTripsFromModelToYAMLAndBack(t *testing.T) {
 			}
 
 			path := filepath.Join(t.TempDir(), pipelineFile)
-			if err := pipeline.SaveFile(path, want); err != nil {
-				t.Fatalf("SaveFile: %v", err)
+			if err := saveFile(path, want); err != nil {
+				t.Fatalf("save: %v", err)
 			}
-			got, gotSteps, err := pipeline.LoadFile(path)
+			got, gotSteps, err := loadFile(path)
 			if err != nil {
-				t.Fatalf("LoadFile: %v", err)
+				t.Fatalf("load: %v", err)
 			}
 
 			if !reflect.DeepEqual(withoutEmptySteps(got), withoutEmptySteps(want)) {
@@ -71,16 +72,16 @@ func TestAnEmptyStepListIsWrittenAsNoStepList(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), pipelineFile)
-	if err := pipeline.SaveFile(path, loaded); err != nil {
-		t.Fatalf("SaveFile: %v", err)
+	if err := saveFile(path, loaded); err != nil {
+		t.Fatalf("save: %v", err)
 	}
 	if written := string(read(t, path)); strings.Contains(written, "processingSteps") {
 		t.Errorf("an empty step list was written out:\n%s", written)
 	}
 
-	reloaded, reloadedSteps, err := pipeline.LoadFile(path)
+	reloaded, reloadedSteps, err := loadFile(path)
 	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
+		t.Fatalf("load: %v", err)
 	}
 	if reloaded.ProcessingSteps != nil || len(reloadedSteps) != 0 {
 		t.Errorf("the reloaded pipeline has %d steps, want none", len(reloaded.ProcessingSteps))
@@ -94,11 +95,11 @@ func TestSavingAnUnchangedPipelineTwiceIsByteIdentical(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), pipelineFile)
-	if err := pipeline.SaveFile(path, loaded); err != nil {
+	if err := saveFile(path, loaded); err != nil {
 		t.Fatalf("first SaveFile: %v", err)
 	}
 	first := read(t, path)
-	if err := pipeline.SaveFile(path, loaded); err != nil {
+	if err := saveFile(path, loaded); err != nil {
 		t.Fatalf("second SaveFile: %v", err)
 	}
 	if second := read(t, path); !bytes.Equal(first, second) {
@@ -107,11 +108,11 @@ func TestSavingAnUnchangedPipelineTwiceIsByteIdentical(t *testing.T) {
 
 	// And the bytes a load-save cycle produces are the bytes it started from,
 	// so a file the agent wrote is a fixed point.
-	reloaded, _, err := pipeline.LoadFile(path)
+	reloaded, _, err := loadFile(path)
 	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
+		t.Fatalf("load: %v", err)
 	}
-	if err := pipeline.SaveFile(path, reloaded); err != nil {
+	if err := saveFile(path, reloaded); err != nil {
 		t.Fatalf("SaveFile after LoadFile: %v", err)
 	}
 	if again := read(t, path); !bytes.Equal(first, again) {
@@ -167,8 +168,8 @@ func TestSaveInAnotherProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse the fixture: %v", err)
 	}
-	if err := pipeline.SaveFile(target, loaded); err != nil {
-		t.Fatalf("SaveFile: %v", err)
+	if err := saveFile(target, loaded); err != nil {
+		t.Fatalf("save: %v", err)
 	}
 }
 
@@ -212,9 +213,9 @@ func TestProcessingStepOrderSurvivesAReadAndAWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), pipelineFile)
 	write(t, path, []byte(stepsInOrder))
 
-	loaded, steps, err := pipeline.LoadFile(path)
+	loaded, steps, err := loadFile(path)
 	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
+		t.Fatalf("load: %v", err)
 	}
 	got := make([]string, 0, len(steps))
 	for _, step := range steps {
@@ -224,8 +225,8 @@ func TestProcessingStepOrderSurvivesAReadAndAWrite(t *testing.T) {
 		t.Errorf("reading reordered the steps: got %v, want %v", got, want)
 	}
 
-	if err := pipeline.SaveFile(path, loaded); err != nil {
-		t.Fatalf("SaveFile: %v", err)
+	if err := saveFile(path, loaded); err != nil {
+		t.Fatalf("save: %v", err)
 	}
 	written := string(read(t, path))
 	at := make([]int, len(want))
@@ -248,12 +249,12 @@ func TestCommentsAreDroppedOnWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), pipelineFile)
 	write(t, path, []byte(stepsInOrder))
 
-	loaded, _, err := pipeline.LoadFile(path)
+	loaded, _, err := loadFile(path)
 	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
+		t.Fatalf("load: %v", err)
 	}
-	if err := pipeline.SaveFile(path, loaded); err != nil {
-		t.Fatalf("SaveFile: %v", err)
+	if err := saveFile(path, loaded); err != nil {
+		t.Fatalf("save: %v", err)
 	}
 
 	written := string(read(t, path))
@@ -278,13 +279,10 @@ func TestEveryInvalidSharedFixtureIsRejectedAsAYAMLFile(t *testing.T) {
 			path := filepath.Join(t.TempDir(), pipelineFile)
 			write(t, path, asYAML)
 
-			_, _, err = pipeline.LoadFile(path)
+			_, _, err = loadFile(path)
 			fault := fileError(t, err)
 			if fault.Kind != pipeline.KindSchema {
 				t.Fatalf("%s failed as %q, want %q: %v", fixture.Name, fault.Kind, pipeline.KindSchema, fault)
-			}
-			if fault.Path != path {
-				t.Errorf("the failure names %q, want the file %q", fault.Path, path)
 			}
 			for _, want := range fixture.Errors {
 				if !reports(fault.Problems, want) {
@@ -430,19 +428,13 @@ func TestMalformedFilesFailWithAStructuredError(t *testing.T) {
 			path := filepath.Join(t.TempDir(), pipelineFile)
 			write(t, path, []byte(testCase.content))
 
-			loaded, steps, err := pipeline.LoadFile(path)
+			loaded, steps, err := loadFile(path)
 			if loaded != nil || steps != nil {
 				t.Errorf("a malformed file produced a pipeline: %+v", loaded)
 			}
 			fault := fileError(t, err)
 			if fault.Kind != testCase.kind {
 				t.Fatalf("failed as %q, want %q: %v", fault.Kind, testCase.kind, fault)
-			}
-			if fault.Path != path {
-				t.Errorf("the failure names %q, want the file %q", fault.Path, path)
-			}
-			if fault.Op != "load" {
-				t.Errorf("the failure says op %q, want %q", fault.Op, "load")
 			}
 			if testCase.location != "" && fault.Location != testCase.location {
 				t.Errorf("the failure points at %q, want %q", fault.Location, testCase.location)
@@ -469,7 +461,7 @@ func TestADuplicateKeyIsNotResolvedToTheLastOccurrence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), pipelineFile)
 	write(t, path, []byte(strings.Replace(stepsInOrder, "topic: in.v1", "topic: in.v1\n  topic: in.v2", 1)))
 
-	loaded, _, err := pipeline.LoadFile(path)
+	loaded, _, err := loadFile(path)
 	if err == nil {
 		t.Fatalf("a duplicate key was accepted, and the pipeline reads source.topic as %q",
 			loaded.Source.Topic)
@@ -486,36 +478,21 @@ func TestADuplicateKeyIsNotResolvedToTheLastOccurrence(t *testing.T) {
 	}
 }
 
-func TestLoadReportsAMissingFileAsAFileFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), pipelineFile)
-	_, _, err := pipeline.LoadFile(path)
-	fault := fileError(t, err)
-	if fault.Kind != pipeline.KindIO {
-		t.Errorf("failed as %q, want %q: %v", fault.Kind, pipeline.KindIO, fault)
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the failure does not unwrap to os.ErrNotExist: %v", err)
-	}
-}
-
-func TestSaveRefusesAnInvalidPipelineAndKeepsThePreviousFile(t *testing.T) {
+func TestAnInvalidPipelineIsNotRenderedSoNothingIsWritten(t *testing.T) {
 	path := filepath.Join(t.TempDir(), pipelineFile)
 	write(t, path, []byte(stepsInOrder))
 	before := read(t, path)
 
-	loaded, _, err := pipeline.LoadFile(path)
+	loaded, _, err := loadFile(path)
 	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
+		t.Fatalf("load: %v", err)
 	}
 	loaded.Language = "cobol"
 
-	err = pipeline.SaveFile(path, loaded)
+	err = saveFile(path, loaded)
 	fault := fileError(t, err)
 	if fault.Kind != pipeline.KindSchema {
 		t.Fatalf("failed as %q, want %q: %v", fault.Kind, pipeline.KindSchema, fault)
-	}
-	if fault.Op != "save" {
-		t.Errorf("the failure says op %q, want %q", fault.Op, "save")
 	}
 	if !reports(fault.Problems, expectedError{InstanceLocation: "/language", KeywordLocation: "/$defs/language/enum"}) {
 		t.Errorf("the failure does not point at /language: %v", fault.Problems)
@@ -523,131 +500,8 @@ func TestSaveRefusesAnInvalidPipelineAndKeepsThePreviousFile(t *testing.T) {
 	if after := read(t, path); !bytes.Equal(before, after) {
 		t.Errorf("a refused save changed the file\nbefore:\n%s\nafter:\n%s", before, after)
 	}
-	if err := pipeline.SaveFile(path, nil); err == nil {
+	if err := saveFile(path, nil); err == nil {
 		t.Error("SaveFile accepted a nil pipeline")
-	}
-}
-
-// refusing is the shape #6 will have: a guard that sees every path and can say
-// no. Until then nothing in the package implements PathGuard, so this stands in
-// for it and proves the seam is on the path of both Load and Save.
-type refusing struct {
-	seen     []string
-	refuse   bool
-	resolved string
-}
-
-func (g *refusing) ResolvePipelinePath(path string) (string, error) {
-	g.seen = append(g.seen, path)
-	if g.refuse {
-		return "", errors.New("outside the project")
-	}
-	if g.resolved != "" {
-		return g.resolved, nil
-	}
-	return path, nil
-}
-
-func TestEveryPathGoesThroughTheGuard(t *testing.T) {
-	path := filepath.Join(t.TempDir(), pipelineFile)
-	write(t, path, []byte(stepsInOrder))
-
-	guard := &refusing{}
-	store := pipeline.Store{Guard: guard}
-
-	loaded, _, err := store.Load(path)
-	if err != nil {
-		t.Fatalf("Load through a guard: %v", err)
-	}
-	if err := store.Save(path, loaded); err != nil {
-		t.Fatalf("Save through a guard: %v", err)
-	}
-	if !reflect.DeepEqual(guard.seen, []string{path, path}) {
-		t.Errorf("the guard saw %v, want the path once per call", guard.seen)
-	}
-}
-
-func TestAGuardThatRefusesStopsTheReadAndTheWrite(t *testing.T) {
-	path := filepath.Join(t.TempDir(), pipelineFile)
-	write(t, path, []byte(stepsInOrder))
-	before := read(t, path)
-
-	loaded, _, err := pipeline.LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
-	}
-
-	store := pipeline.Store{Guard: &refusing{refuse: true}}
-	if _, _, err := store.Load(path); fileError(t, err).Kind != pipeline.KindForbidden {
-		t.Errorf("a refused load failed as %q, want %q", fileError(t, err).Kind, pipeline.KindForbidden)
-	}
-	err = store.Save(path, loaded)
-	if fault := fileError(t, err); fault.Kind != pipeline.KindForbidden {
-		t.Errorf("a refused save failed as %q, want %q", fault.Kind, pipeline.KindForbidden)
-	}
-	if after := read(t, path); !bytes.Equal(before, after) {
-		t.Errorf("a refused save changed the file\nbefore:\n%s\nafter:\n%s", before, after)
-	}
-}
-
-func TestSaveKeepsThePreviousFileWhenTheDirectoryCannotBeWrittenTo(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, pipelineFile)
-	write(t, path, []byte(stepsInOrder))
-	before := read(t, path)
-
-	loaded, _, err := pipeline.LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
-	}
-	loaded.RuntimeConfiguration.NetworkMode = "host"
-
-	// Read and execute, so the file is still readable and no temporary file
-	// can be created next to it.
-	if err := os.Chmod(directory, 0o500); err != nil {
-		t.Fatalf("chmod the directory: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(directory, 0o700) })
-
-	err = pipeline.SaveFile(path, loaded)
-	fault := fileError(t, err)
-	if fault.Kind != pipeline.KindIO {
-		t.Fatalf("failed as %q, want %q: %v", fault.Kind, pipeline.KindIO, fault)
-	}
-	if after := read(t, path); !bytes.Equal(before, after) {
-		t.Errorf("a failed save replaced the previous file\nbefore:\n%s\nafter:\n%s", before, after)
-	}
-}
-
-func TestSaveLeavesNothingBesideThePipelineFile(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, pipelineFile)
-	loaded, _, err := pipeline.Parse(findValidFixture(t, "every-block-type"))
-	if err != nil {
-		t.Fatalf("Parse the fixture: %v", err)
-	}
-	if err := pipeline.SaveFile(path, loaded); err != nil {
-		t.Fatalf("SaveFile: %v", err)
-	}
-
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		t.Fatalf("read the directory: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Name() != pipelineFile {
-		names := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			names = append(names, entry.Name())
-		}
-		t.Errorf("the directory holds %v, want just %q", names, pipelineFile)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat the pipeline file: %v", err)
-	}
-	if info.Mode().Perm() != 0o644 {
-		t.Errorf("a new pipeline file has mode %v, want 0644", info.Mode().Perm())
 	}
 }
 
@@ -685,4 +539,24 @@ func write(t *testing.T, path string, data []byte) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+// loadFile reads path and parses it the way the agent does, so a test can put
+// bytes on disk and read them back without a file layer in this package.
+func loadFile(path string) (*pipeline.Pipeline, []pipeline.Step, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pipeline.ParseYAML(data)
+}
+
+// saveFile renders p and writes the bytes to path; nothing is written when p
+// does not render.
+func saveFile(path string, p *pipeline.Pipeline) error {
+	data, err := pipeline.MarshalYAML(p)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }

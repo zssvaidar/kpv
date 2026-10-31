@@ -12,9 +12,9 @@
 // filesystem code routes through it rather than calling os directly. That is
 // checked where it is visible -- which files in the module contain a
 // filesystem call -- so a new route that reads a path fails here rather than
-// shipping unguarded. internal/pipeline is the one other place, because its
-// store predates this package and #48 moves it over; httpapi and channel carry
-// their own bans on reaching either.
+// shipping unguarded. There is no other place: internal/pipeline's store
+// moved onto the guard in internal/catalog (#48), and httpapi and channel
+// carry their own bans on reaching the filesystem at all.
 //
 // Both tests read the syntax tree of every non-test file in the module. Test
 // files are excluded on purpose: a test may run a command (one of #3's does,
@@ -111,7 +111,7 @@ func parseModule(t *testing.T) []moduleFile {
 	if len(out) < 20 || len(packages) < 6 {
 		t.Fatalf("parsed %d files in %d packages of the module, which is too few for these tests to be looking at the right thing", len(out), len(packages))
 	}
-	for _, expected := range []string{"cmd/agent", "internal/channel", "internal/httpapi", "internal/pipeline", "internal/projectfs", "internal/version"} {
+	for _, expected := range []string{"cmd/agent", "internal/catalog", "internal/channel", "internal/httpapi", "internal/pipeline", "internal/projectfs", "internal/version"} {
 		if !packages[expected] {
 			t.Fatalf("%s was not parsed, so these tests are not covering the whole module", expected)
 		}
@@ -199,8 +199,8 @@ func TestNothingInTheAgentCanRunACommand(t *testing.T) {
 	}
 }
 
-// Every filesystem call in the module is in one of the two packages allowed to
-// make one. This is what "all later filesystem code routes through this
+// Every filesystem call in the module is in the one package allowed to make
+// one. This is what "all later filesystem code routes through this
 // package rather than calling os directly" means in a form that fails when it
 // stops being true.
 func TestTheFilesystemIsOnlyReachedFromThePackagesAllowedToReachIt(t *testing.T) {
@@ -224,7 +224,6 @@ func TestTheFilesystemIsOnlyReachedFromThePackagesAllowedToReachIt(t *testing.T)
 	}
 	allowed := map[string]string{
 		"internal/projectfs": "is the package every filesystem call is supposed to go through",
-		"internal/pipeline":  "predates this package; #48 moves its store onto the guard",
 	}
 
 	files := parseModule(t)
@@ -269,9 +268,6 @@ func TestTheFilesystemIsOnlyReachedFromThePackagesAllowedToReachIt(t *testing.T)
 	if found["internal/projectfs"] < 4 {
 		t.Fatalf("only %d filesystem calls were recognised in internal/projectfs; the names have gone stale", found["internal/projectfs"])
 	}
-	if found["internal/pipeline"] < 3 {
-		t.Fatalf("only %d filesystem calls were recognised in internal/pipeline, which has several; the names have gone stale", found["internal/pipeline"])
-	}
 	// Most of this package's filesystem work is not an os call at all: it
 	// goes through the *os.Root of the path's own root. os.OpenRoot is where
 	// that descriptor comes from, so it is the one name whose absence would
@@ -279,8 +275,8 @@ func TestTheFilesystemIsOnlyReachedFromThePackagesAllowedToReachIt(t *testing.T)
 	if !names["os.OpenRoot"] {
 		t.Fatalf("os.OpenRoot was not recognised anywhere, so either the roots are no longer held open or this test is matching nothing; recognised %v", names)
 	}
-	if !names["os.ReadFile"] {
-		t.Fatalf("os.ReadFile was not recognised anywhere; this test is matching nothing")
+	if !names["os.Stat"] {
+		t.Fatalf("os.Stat was not recognised anywhere; this test is matching nothing")
 	}
 	t.Logf("filesystem calls by package: %v", found)
 }

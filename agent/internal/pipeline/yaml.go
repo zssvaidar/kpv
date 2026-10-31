@@ -459,3 +459,63 @@ func yamlNodeFromJSON(decoder *json.Decoder) (*yaml.Node, error) {
 func yamlScalarNode(tag, value string) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value}
 }
+
+// PositionInYAML is where the value a JSON Pointer names sits in a YAML
+// document: the 1-based line and column of the value, or of the key it is
+// under when the pointer names a missing member (which is where a schema
+// problem such as a missing required property is best shown). ok is false
+// when data is not one YAML document or the pointer leads nowhere in it.
+//
+// It exists so a schema problem, which validate.go reports by pointer into the
+// JSON the document was converted to, can be shown on the line of the file a
+// person would edit.
+func PositionInYAML(data []byte, pointer string) (line, column int, ok bool) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var document yaml.Node
+	if err := decoder.Decode(&document); err != nil {
+		return 0, 0, false
+	}
+	node := &document
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) != 1 {
+			return 0, 0, false
+		}
+		node = node.Content[0]
+	}
+	if pointer != "" {
+		if !strings.HasPrefix(pointer, "/") {
+			return 0, 0, false
+		}
+		for _, token := range strings.Split(pointer[1:], "/") {
+			token = strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
+			for depth := 0; node.Kind == yaml.AliasNode && node.Alias != nil && depth < maxAliasDepth; depth++ {
+				node = node.Alias
+			}
+			next := yamlChild(node, token)
+			if next == nil {
+				return 0, 0, false
+			}
+			node = next
+		}
+	}
+	return node.Line, node.Column, node.Line > 0
+}
+
+// yamlChild is the member token names in a mapping or a sequence, nil when
+// there is none.
+func yamlChild(node *yaml.Node, token string) *yaml.Node {
+	switch node.Kind {
+	case yaml.MappingNode:
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			if node.Content[index].Value == token {
+				return node.Content[index+1]
+			}
+		}
+	case yaml.SequenceNode:
+		index, err := strconv.Atoi(token)
+		if err == nil && index >= 0 && index < len(node.Content) && strconv.Itoa(index) == token {
+			return node.Content[index]
+		}
+	}
+	return nil
+}

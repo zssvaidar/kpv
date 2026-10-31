@@ -18,7 +18,10 @@ Areas
   shared fixtures
 - `agent/CLAUDE.md` - the Go module: which package may import which, the
   module-wide bans, the startup lines
-- `agent/internal/pipeline/CLAUDE.md` - reading and writing `pipeline.yaml`
+- `agent/internal/pipeline/CLAUDE.md` - parsing, validating and rendering a
+  pipeline document
+- `agent/internal/catalog/CLAUDE.md` - where a pipeline lives: the pipeline
+  list, open, create, and reading and writing `pipeline.yaml`
 - `agent/internal/projectfs/CLAUDE.md` - the path guard and authorized project
   roots
 - `agent/internal/codegen/CLAUDE.md` - generating files into `generated/`, the

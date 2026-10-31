@@ -1,11 +1,10 @@
 # internal/pipeline
 
-Reads and writes a pipeline file. The model is the generated one
-(`models_gen.go`, from `schema/pipeline.schema.json`); this package is the
-validation and file layer around it. Nothing in the running agent uses it yet:
-`cmd/agent` does not import it and `httpapi` may not (`agent/CLAUDE.md`).
-Which directory a pipeline lives in, and moving the store onto the guard's
-operations, is #48.
+Parses, validates and renders a pipeline document. The model is the generated
+one (`models_gen.go`, from `schema/pipeline.schema.json`); this package is the
+validation layer around it and makes no filesystem call. Reading and writing
+`pipeline.yaml`, and where a pipeline lives, are `internal/catalog`'s (#48);
+`httpapi` may not import this package (`agent/CLAUDE.md`).
 
 - YAML is bridged through JSON (`YAMLToJSON`, `JSONToYAML` in `yaml.go`), so
   the one JSON Schema validator (`validate.go`) covers both formats
@@ -18,15 +17,11 @@ operations, is #48.
   `yaml.v3` through a `Decoder`, never `Unmarshal`; `yaml.go` says why
   (`TestMalformedFilesFailWithAStructuredError`,
   `TestADuplicateKeyIsNotResolvedToTheLastOccurrence` in `file_test.go`)
-- `Save` validates before writing and writes atomically (a temporary file in
-  the same directory, then a rename), and the same pipeline is always the same
-  bytes, even across processes. Comments are dropped (`atomic_test.go`,
-  `file_test.go`)
-- `Store.resolve` is the one place a path enters the filesystem, through
-  `Store.Guard`. `projectfs.Guard.PipelineSeam()` satisfies it, but it hands a
-  path back to be opened with `os`, which is the weaker route; `seam.go` in
-  `projectfs` says why. `LoadFile` and `SaveFile` have no guard
-  (`TestEveryPathGoesThroughTheGuard`)
+- `MarshalYAML` validates before rendering, and the same pipeline is always
+  the same bytes, even across processes. Comments are dropped
+  (`file_test.go`, which puts the bytes on disk itself)
+- `PositionInYAML` gives the line and column a JSON Pointer names in a YAML
+  document, so a schema problem can be shown on the line a person edits
 - the generated `ProcessingStep` is an empty interface; `TypedSteps` in
   `steps.go` maps each `type` discriminator to its struct, so a new step type
   needs a case there

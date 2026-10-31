@@ -205,3 +205,28 @@ func TestTheBridgeRejectsWhatJSONCannotHold(t *testing.T) {
 		})
 	}
 }
+
+func TestPositionInYAMLFindsTheLineAPointerNames(t *testing.T) {
+	document := []byte("id: a\nsource:\n  id: in\n  topic: x\nprocessingSteps:\n  - id: one\n    type: validate\n    configuration:\n      rules: []\n")
+	for _, testCase := range []struct {
+		pointer      string
+		line, column int
+		ok           bool
+	}{
+		{"", 1, 1, true},
+		{"/id", 1, 5, true},
+		{"/source/topic", 4, 10, true},
+		{"/processingSteps/0/configuration", 9, 7, true},
+		{"/processingSteps/1", 0, 0, false},
+		{"/missing", 0, 0, false},
+		{"no-slash", 0, 0, false},
+	} {
+		line, column, ok := pipeline.PositionInYAML(document, testCase.pointer)
+		if line != testCase.line || column != testCase.column || ok != testCase.ok {
+			t.Errorf("%q is at %d:%d (%v), want %d:%d (%v)", testCase.pointer, line, column, ok, testCase.line, testCase.column, testCase.ok)
+		}
+	}
+	if _, _, ok := pipeline.PositionInYAML([]byte("a: [\n"), "/a"); ok {
+		t.Error("a document that does not parse has a position")
+	}
+}

@@ -6,7 +6,7 @@ package under `internal/` has its own `CLAUDE.md`.
 ## Which package may use which
 
 These rules are tests that read the non-test source, so breaking one fails
-`go test ./...` rather than review. `cmd/agent` wires `httpapi` and
+`go test ./...` rather than review. `cmd/agent` wires `httpapi`, `catalog` and
 `projectfs` together.
 
 - `internal/httpapi` may not import `os`, `io/fs`, `io/ioutil`,
@@ -26,14 +26,19 @@ These rules are tests that read the non-test source, so breaking one fails
   agent, nor `os` or `path/filepath`; `internal/projectfs`, `internal/pipeline`,
   `internal/codegen` and `internal/channel` do not import it
   (`internal/secrets/source_test.go`)
+- `internal/catalog` imports `internal/projectfs` and `internal/pipeline` and
+  nothing else in the agent, nor `os` or `path/filepath`; `internal/projectfs`,
+  `internal/pipeline`, `internal/codegen`, `internal/secrets` and
+  `internal/channel` do not import it (`internal/catalog/source_test.go`).
+  `internal/httpapi` holds a `*catalog.Catalog` and never touches the parsed
+  model it carries
 - `internal/projectfs` and `internal/pipeline` import no other agent package.
   No test holds this; it is true today (`go list -f '{{.Imports}}' ./...`)
 
 Module-wide, in `internal/projectfs/boundary_test.go`:
 
 - no filesystem call (`os.Open`, `os.Stat`, `filepath.Abs`, ...) outside
-  `internal/projectfs` and `internal/pipeline`; `pipeline` is allowed until #48
-  moves its store onto the guard
+  `internal/projectfs`
 - nothing can run a command: no `os/exec`, `syscall`, `golang.org/x/sys`, no
   `os.StartProcess`, and no string literal naming a shell or its `-c` flag. An
   issue that needs to run a process has to change this test, so raise it on

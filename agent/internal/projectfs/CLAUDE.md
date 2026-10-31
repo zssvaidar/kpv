@@ -7,8 +7,7 @@ through a held `*os.Root` descriptor, so the kernel refuses anything that
 leaves a root.
 
 - `Guard` holds the authorized roots and performs operations through them; it
-  never hands out a path to open. `PipelineSeam` (`seam.go`) is the one
-  exception, kept for `internal/pipeline` until #48
+  never hands out a path to open
 - `Browser` is read-only browsing of the authorized roots plus the home
   directory (`browse.go`, at most `MaxListing` entries)
 - `Roots` (#63) is the user's set of project roots, kept in step with a file.
