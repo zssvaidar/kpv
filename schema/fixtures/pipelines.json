@@ -190,6 +190,67 @@
         },
         "runtimeConfiguration": { "networkMode": "docker" }
       }
+    },
+    {
+      "name": "source-names-a-connection",
+      "why": "A Kafka source may name the connection it reads from (#24); the name is all the pipeline file holds of it.",
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "connection": "local-kafka"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "source-and-destination-name-different-connections",
+      "why": "The source and the destination may each name their own connection.",
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "connection": "eu-cluster"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1",
+          "connection": "Billing.Cluster_2"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "connection-name-of-maximum-length",
+      "why": "A connection name may be 64 characters long, and start with a digit.",
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "connection": "9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
     }
   ],
   "invalid": [
@@ -724,6 +785,190 @@
           "id": "orders",
           "type": "kafkaSource",
           "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "empty-connection-name",
+      "why": "An empty connection name names nothing; leave connection out instead.",
+      "errors": [
+        {
+          "instanceLocation": "/source/connection",
+          "keywordLocation": "/$defs/kafkaConnectionName/minLength"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "connection": ""
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "connection-name-breaking-the-rule",
+      "why": "A connection name starts with a letter or digit and holds no spaces.",
+      "errors": [
+        {
+          "instanceLocation": "/destination/connection",
+          "keywordLocation": "/$defs/kafkaConnectionName/pattern"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1",
+          "connection": "my cluster"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "connection-name-too-long",
+      "why": "A connection name is at most 64 characters.",
+      "errors": [
+        {
+          "instanceLocation": "/source/connection",
+          "keywordLocation": "/$defs/kafkaConnectionName/maxLength"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "connection": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "connection-not-a-string",
+      "why": "A connection is named by a string, never described inline.",
+      "errors": [
+        {
+          "instanceLocation": "/source/connection",
+          "keywordLocation": "/$defs/kafkaConnectionName/type"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "connection": { "bootstrapServers": ["broker:9092"] }
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "password-on-a-kafka-source",
+      "why": "Credentials never live in the pipeline file: a credential-shaped key on a Kafka block is an extra property.",
+      "errors": [
+        {
+          "instanceLocation": "/source",
+          "keywordLocation": "/$defs/kafkaSourceBlock/additionalProperties"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "connection": "local-kafka",
+          "password": "hunter2"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "sasl-password-on-a-kafka-destination",
+      "why": "The same for a destination block.",
+      "errors": [
+        {
+          "instanceLocation": "/destination",
+          "keywordLocation": "/$defs/kafkaDestinationBlock/additionalProperties"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1",
+          "connection": "local-kafka",
+          "saslPassword": "hunter2"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "bootstrap-servers-on-a-kafka-source",
+      "why": "Connection settings live outside the pipeline file, so a bootstrap server on a block is an extra property.",
+      "errors": [
+        {
+          "instanceLocation": "/source",
+          "keywordLocation": "/$defs/kafkaSourceBlock/additionalProperties"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1",
+          "bootstrapServers": ["broker:9092"]
         },
         "destination": {
           "id": "billing",

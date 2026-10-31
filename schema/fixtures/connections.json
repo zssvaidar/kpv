@@ -1,0 +1,938 @@
+{
+  "$comment": "The shared connection fixtures (#24). Both toolchains read this file: agent/internal/connections/fixtures_test.go and agent/internal/httpapi/connections_fixtures_test.go, and packages/schema/src/connection-fixtures.test.ts. Each invalid record states its failures as instanceLocation plus either keywordLocation (an absolute pointer into schema/connection.schema.json) or rule (a combination rule, rules.go and connection-rules.ts). names holds names both schemas' connectionName must agree on. The PEM text here is placeholder text: whether it parses is the agent's check, tested in Go.",
+  "records": {
+    "valid": [
+      {
+        "name": "plaintext",
+        "why": "PLAINTEXT needs nothing but the brokers.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "ssl-without-tls-material",
+        "why": "SSL may rely on the system trust store and no client certificate.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SSL"
+        }
+      },
+      {
+        "name": "ssl-with-ca-and-client-certificate",
+        "why": "SSL takes a CA certificate and a client certificate with its key.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SSL",
+          "tlsCaCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n",
+          "tlsClientCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n",
+          "tlsClientKey": "-----BEGIN PRIVATE KEY-----\nMIIBfixturetext\n-----END PRIVATE KEY-----\n"
+        }
+      },
+      {
+        "name": "sasl-plaintext-plain",
+        "why": "SASL_PLAINTEXT carries PLAIN with a username and a password.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_PLAINTEXT",
+          "saslMechanism": "PLAIN",
+          "saslUsername": "svc-orders",
+          "saslPassword": "fixture-password"
+        }
+      },
+      {
+        "name": "sasl-plaintext-scram-sha-256",
+        "why": "SASL_PLAINTEXT carries SCRAM-SHA-256 with a username and a password.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_PLAINTEXT",
+          "saslMechanism": "SCRAM-SHA-256",
+          "saslUsername": "svc-orders",
+          "saslPassword": "fixture-password"
+        }
+      },
+      {
+        "name": "sasl-plaintext-scram-sha-512",
+        "why": "SASL_PLAINTEXT carries SCRAM-SHA-512 with a username and a password.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_PLAINTEXT",
+          "saslMechanism": "SCRAM-SHA-512",
+          "saslUsername": "svc-orders",
+          "saslPassword": "fixture-password"
+        }
+      },
+      {
+        "name": "sasl-ssl-plain",
+        "why": "SASL_SSL carries PLAIN with a username and a password.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "PLAIN",
+          "saslUsername": "svc-orders",
+          "saslPassword": "fixture-password"
+        }
+      },
+      {
+        "name": "sasl-ssl-scram-sha-256",
+        "why": "SASL_SSL carries SCRAM-SHA-256 with a username and a password.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "SCRAM-SHA-256",
+          "saslUsername": "svc-orders",
+          "saslPassword": "fixture-password"
+        }
+      },
+      {
+        "name": "sasl-ssl-scram-sha-512",
+        "why": "SASL_SSL carries SCRAM-SHA-512 with a username and a password.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "SCRAM-SHA-512",
+          "saslUsername": "svc-orders",
+          "saslPassword": "fixture-password"
+        }
+      },
+      {
+        "name": "sasl-ssl-with-ca-certificate",
+        "why": "SASL_SSL is SASL over TLS, so it takes TLS settings too.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "SCRAM-SHA-512",
+          "saslUsername": "svc",
+          "saslPassword": "p",
+          "tlsCaCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n"
+        }
+      },
+      {
+        "name": "many-bootstrap-servers",
+        "why": "DNS names, IPv4, bracketed IPv6, and the lowest and highest port.",
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": [
+            "kafka-1.example.com:9092",
+            "10.0.0.7:1",
+            "[::1]:65535",
+            "[2001:db8::1]:9093",
+            "broker:443"
+          ],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "name-of-maximum-length",
+        "why": "A name may be 64 characters and start with a digit.",
+        "connection": {
+          "name": "9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "empty-bootstrap-servers",
+        "why": "At least one broker is needed.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers",
+            "keywordLocation": "/$defs/bootstrapServers/minItems"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": [],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "bootstrap-server-without-port",
+        "why": "A broker is host:port.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/0",
+            "keywordLocation": "/$defs/bootstrapServer/pattern"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["broker"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "bootstrap-server-with-port-zero",
+        "why": "A port is 1 to 65535.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/1",
+            "keywordLocation": "/$defs/bootstrapServer/pattern"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["a:9092", "broker:0"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "bootstrap-server-with-port-65536",
+        "why": "A port is 1 to 65535.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/0",
+            "keywordLocation": "/$defs/bootstrapServer/pattern"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["broker:65536"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "bootstrap-server-with-leading-zero",
+        "why": "A port has no leading zero.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/0",
+            "keywordLocation": "/$defs/bootstrapServer/pattern"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["broker:09092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "blank-bootstrap-server",
+        "why": "An empty entry is no broker.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/1",
+            "keywordLocation": "/$defs/bootstrapServer/pattern"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["broker:9092", ""],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "whitespace-bootstrap-server",
+        "why": "A blank entry is no broker.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/0",
+            "keywordLocation": "/$defs/bootstrapServer/pattern"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["   "],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "ipv6-without-brackets",
+        "why": "An IPv6 host is written in brackets, so its port can be told apart.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/0",
+            "keywordLocation": "/$defs/bootstrapServer/pattern"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["::1:9092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "duplicate-bootstrap-server",
+        "why": "The same broker twice is a mistake; the later one is refused, ignoring letter case.",
+        "errors": [
+          {
+            "instanceLocation": "/bootstrapServers/2",
+            "rule": "duplicateBootstrapServer"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["broker:9092", "other:9092", "BROKER:9092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "unknown-security-protocol",
+        "why": "The protocol is one of the four Kafka names.",
+        "errors": [
+          {
+            "instanceLocation": "/securityProtocol",
+            "keywordLocation": "/$defs/securityProtocol/enum"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "TLS"
+        }
+      },
+      {
+        "name": "unknown-sasl-mechanism",
+        "why": "OAUTHBEARER and GSSAPI are not supported (#75).",
+        "errors": [
+          {
+            "instanceLocation": "/saslMechanism",
+            "keywordLocation": "/$defs/saslMechanism/enum"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "OAUTHBEARER",
+          "saslUsername": "u",
+          "saslPassword": "p"
+        }
+      },
+      {
+        "name": "sasl-mechanism-on-plaintext",
+        "why": "PLAINTEXT carries no SASL.",
+        "errors": [
+          {
+            "instanceLocation": "/saslMechanism",
+            "rule": "saslNotAllowed"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT",
+          "saslMechanism": "PLAIN"
+        }
+      },
+      {
+        "name": "sasl-username-on-plaintext",
+        "why": "PLAINTEXT carries no SASL, so no SASL credential either.",
+        "errors": [
+          {
+            "instanceLocation": "/saslUsername",
+            "rule": "saslNotAllowed"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT",
+          "saslUsername": "u"
+        }
+      },
+      {
+        "name": "sasl-password-on-ssl",
+        "why": "SSL carries no SASL.",
+        "errors": [
+          {
+            "instanceLocation": "/saslPassword",
+            "rule": "saslNotAllowed"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SSL",
+          "saslPassword": "p"
+        }
+      },
+      {
+        "name": "sasl-mechanism-on-ssl",
+        "why": "SSL carries no SASL.",
+        "errors": [
+          {
+            "instanceLocation": "/saslMechanism",
+            "rule": "saslNotAllowed"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SSL",
+          "saslMechanism": "SCRAM-SHA-256"
+        }
+      },
+      {
+        "name": "sasl-plaintext-without-mechanism",
+        "why": "SASL needs a mechanism.",
+        "errors": [
+          {
+            "instanceLocation": "/saslMechanism",
+            "rule": "saslRequired"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_PLAINTEXT",
+          "saslUsername": "u",
+          "saslPassword": "p"
+        }
+      },
+      {
+        "name": "sasl-ssl-without-username",
+        "why": "SASL needs a username.",
+        "errors": [
+          {
+            "instanceLocation": "/saslUsername",
+            "rule": "saslRequired"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "PLAIN",
+          "saslPassword": "p"
+        }
+      },
+      {
+        "name": "sasl-ssl-without-password",
+        "why": "SASL needs a password.",
+        "errors": [
+          {
+            "instanceLocation": "/saslPassword",
+            "rule": "saslRequired"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "PLAIN",
+          "saslUsername": "u"
+        }
+      },
+      {
+        "name": "ca-certificate-on-plaintext",
+        "why": "PLAINTEXT does not use TLS.",
+        "errors": [
+          {
+            "instanceLocation": "/tlsCaCertificate",
+            "rule": "tlsNotAllowed"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT",
+          "tlsCaCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n"
+        }
+      },
+      {
+        "name": "client-certificate-on-sasl-plaintext",
+        "why": "SASL_PLAINTEXT does not use TLS.",
+        "errors": [
+          {
+            "instanceLocation": "/tlsClientCertificate",
+            "rule": "tlsNotAllowed"
+          },
+          {
+            "instanceLocation": "/tlsClientKey",
+            "rule": "tlsNotAllowed"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_PLAINTEXT",
+          "saslMechanism": "PLAIN",
+          "saslUsername": "u",
+          "saslPassword": "p",
+          "tlsClientCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n",
+          "tlsClientKey": "-----BEGIN PRIVATE KEY-----\nMIIBfixturetext\n-----END PRIVATE KEY-----\n"
+        }
+      },
+      {
+        "name": "client-certificate-without-key",
+        "why": "A client certificate is no use without its key.",
+        "errors": [
+          {
+            "instanceLocation": "/tlsClientKey",
+            "rule": "clientKeyRequired"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SSL",
+          "tlsClientCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n"
+        }
+      },
+      {
+        "name": "client-key-without-certificate",
+        "why": "A client key is no use without its certificate.",
+        "errors": [
+          {
+            "instanceLocation": "/tlsClientCertificate",
+            "rule": "clientCertificateRequired"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "PLAIN",
+          "saslUsername": "u",
+          "saslPassword": "p",
+          "tlsClientKey": "-----BEGIN PRIVATE KEY-----\nMIIBfixturetext\n-----END PRIVATE KEY-----\n"
+        }
+      },
+      {
+        "name": "empty-password",
+        "why": "An empty password is refused, never read as no password.",
+        "errors": [
+          {
+            "instanceLocation": "/saslPassword",
+            "keywordLocation": "/$defs/saslPassword/minLength"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SASL_SSL",
+          "saslMechanism": "PLAIN",
+          "saslUsername": "u",
+          "saslPassword": ""
+        }
+      },
+      {
+        "name": "empty-client-key",
+        "why": "An empty key is refused.",
+        "errors": [
+          {
+            "instanceLocation": "/tlsClientKey",
+            "keywordLocation": "/$defs/privateKeyPem/minLength"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "SSL",
+          "tlsClientCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n",
+          "tlsClientKey": ""
+        }
+      },
+      {
+        "name": "unknown-credential-key",
+        "why": "The record is closed; a key it does not define is refused.",
+        "errors": [
+          {
+            "instanceLocation": "",
+            "keywordLocation": "/$defs/connection/additionalProperties"
+          }
+        ],
+        "connection": {
+          "name": "local-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT",
+          "password": "p"
+        }
+      },
+      {
+        "name": "missing-protocol",
+        "why": "The protocol is not something to guess.",
+        "errors": [
+          {
+            "instanceLocation": "",
+            "keywordLocation": "/$defs/connection/required"
+          }
+        ],
+        "connection": {
+          "name": "a",
+          "bootstrapServers": ["b:1"]
+        }
+      },
+      {
+        "name": "empty-name",
+        "why": "A connection needs a name.",
+        "errors": [
+          {
+            "instanceLocation": "/name",
+            "keywordLocation": "/$defs/connectionName/minLength"
+          }
+        ],
+        "connection": {
+          "name": "",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "name-with-a-space",
+        "why": "A name holds no spaces.",
+        "errors": [
+          {
+            "instanceLocation": "/name",
+            "keywordLocation": "/$defs/connectionName/pattern"
+          }
+        ],
+        "connection": {
+          "name": "my cluster",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      },
+      {
+        "name": "name-starting-with-a-hyphen",
+        "why": "A name starts with a letter or digit.",
+        "errors": [
+          {
+            "instanceLocation": "/name",
+            "keywordLocation": "/$defs/connectionName/pattern"
+          }
+        ],
+        "connection": {
+          "name": "-kafka",
+          "bootstrapServers": ["localhost:9092"],
+          "securityProtocol": "PLAINTEXT"
+        }
+      }
+    ]
+  },
+  "names": {
+    "valid": [
+      "local-kafka",
+      "Kafka",
+      "9lives",
+      "eu.cluster_2",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      "my cluster",
+      "-kafka",
+      ".hidden",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ünïcode",
+      "a/b"
+    ]
+  },
+  "responses": {
+    "lists": {
+      "valid": [
+        {
+          "name": "empty",
+          "why": "No connections is an empty list.",
+          "body": {
+            "connections": []
+          }
+        },
+        {
+          "name": "with-credentials-set",
+          "why": "A summary says a credential is set, never what it is.",
+          "body": {
+            "connections": [
+              {
+                "name": "local-kafka",
+                "bootstrapServers": ["localhost:9092"],
+                "securityProtocol": "SASL_SSL",
+                "saslPasswordSet": true,
+                "tlsClientKeySet": true,
+                "saslMechanism": "PLAIN",
+                "saslUsername": "u",
+                "tlsCaCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n",
+                "tlsClientCertificate": "-----BEGIN CERTIFICATE-----\nMIIBfixturetext\n-----END CERTIFICATE-----\n"
+              }
+            ]
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "password-in-a-summary",
+          "why": "A summary never carries a credential value.",
+          "body": {
+            "connections": [
+              {
+                "name": "local-kafka",
+                "bootstrapServers": ["localhost:9092"],
+                "securityProtocol": "PLAINTEXT",
+                "saslPasswordSet": false,
+                "tlsClientKeySet": false,
+                "saslPassword": "p"
+              }
+            ]
+          }
+        },
+        {
+          "name": "client-key-in-a-summary",
+          "why": "Nor the private key.",
+          "body": {
+            "connections": [
+              {
+                "name": "local-kafka",
+                "bootstrapServers": ["localhost:9092"],
+                "securityProtocol": "PLAINTEXT",
+                "saslPasswordSet": false,
+                "tlsClientKeySet": false,
+                "tlsClientKey": "-----BEGIN PRIVATE KEY-----\nMIIBfixturetext\n-----END PRIVATE KEY-----\n"
+              }
+            ]
+          }
+        },
+        {
+          "name": "without-set-flags",
+          "why": "Whether each credential is set is always answered.",
+          "body": {
+            "connections": [
+              {
+                "name": "a",
+                "bootstrapServers": ["b:1"],
+                "securityProtocol": "PLAINTEXT"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "names": {
+      "valid": [
+        {
+          "name": "empty",
+          "why": "An empty store answers an empty list, not an error.",
+          "body": {
+            "names": []
+          }
+        },
+        {
+          "name": "two",
+          "why": "Names only.",
+          "body": {
+            "names": ["a", "B"]
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "with-a-summary",
+          "why": "The name list carries nothing but names.",
+          "body": {
+            "names": [],
+            "connections": []
+          }
+        },
+        {
+          "name": "a-bad-name",
+          "why": "Every name keeps the name rule.",
+          "body": {
+            "names": ["my cluster"]
+          }
+        }
+      ]
+    },
+    "updates": {
+      "valid": [
+        {
+          "name": "keep-everything",
+          "why": "Credentials left out are kept.",
+          "body": {
+            "current": "a",
+            "name": "a",
+            "bootstrapServers": ["b:1"],
+            "securityProtocol": "SASL_SSL",
+            "saslMechanism": "PLAIN",
+            "saslUsername": "u"
+          }
+        },
+        {
+          "name": "rename-and-remove-key",
+          "why": "A rename with an explicit remove and a confirmation.",
+          "body": {
+            "current": "a",
+            "name": "b",
+            "bootstrapServers": ["b:1"],
+            "securityProtocol": "SSL",
+            "remove": ["tlsClientKey"],
+            "confirm": true
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "unknown-remove",
+          "why": "Only the two credentials can be removed.",
+          "body": {
+            "current": "a",
+            "name": "a",
+            "bootstrapServers": ["b:1"],
+            "securityProtocol": "SSL",
+            "remove": ["tlsCaCertificate"]
+          }
+        },
+        {
+          "name": "remove-twice",
+          "why": "A credential is listed once.",
+          "body": {
+            "current": "a",
+            "name": "a",
+            "bootstrapServers": ["b:1"],
+            "securityProtocol": "SSL",
+            "remove": ["saslPassword", "saslPassword"]
+          }
+        },
+        {
+          "name": "no-current",
+          "why": "An update says which connection it changes.",
+          "body": {
+            "name": "a",
+            "bootstrapServers": ["b:1"],
+            "securityProtocol": "SSL"
+          }
+        }
+      ]
+    },
+    "deletes": {
+      "valid": [
+        {
+          "name": "plain",
+          "why": "A delete names the connection.",
+          "body": {
+            "name": "a"
+          }
+        },
+        {
+          "name": "confirmed",
+          "why": "The confirmation after a report.",
+          "body": {
+            "name": "a",
+            "confirm": true
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "no-name",
+          "why": "A delete names the connection.",
+          "body": {
+            "confirm": true
+          }
+        }
+      ]
+    },
+    "errors": {
+      "valid": [
+        {
+          "name": "invalid-with-problems",
+          "why": "An invalid request says which field is wrong.",
+          "body": {
+            "error": "invalid",
+            "message": "m",
+            "problems": [
+              {
+                "pointer": "/tlsClientKey",
+                "message": "this is not a PEM private key"
+              }
+            ]
+          }
+        },
+        {
+          "name": "referenced",
+          "why": "A delete or rename that pipelines name reports each one and what could not be checked.",
+          "body": {
+            "error": "referenced",
+            "message": "m",
+            "references": [
+              {
+                "root": "/home/u/code",
+                "directory": "orders",
+                "pipelineId": "orders",
+                "block": "source"
+              },
+              {
+                "root": "/home/u/solo",
+                "pipelineId": "solo",
+                "block": "destination"
+              }
+            ],
+            "unchecked": [
+              {
+                "root": "/home/u/code",
+                "directory": "broken",
+                "reason": "parse"
+              },
+              {
+                "root": "/home/u/gone",
+                "reason": "rootUnavailable"
+              },
+              {
+                "root": "/home/u/big",
+                "reason": "truncated"
+              }
+            ]
+          }
+        },
+        {
+          "name": "duplicate-name",
+          "why": "A plain kind.",
+          "body": {
+            "error": "duplicateName",
+            "message": "m"
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "unknown-kind",
+          "why": "Kinds are a closed set.",
+          "body": {
+            "error": "forbidden",
+            "message": "m"
+          }
+        },
+        {
+          "name": "unknown-block",
+          "why": "A reference is to the source or the destination.",
+          "body": {
+            "error": "referenced",
+            "message": "m",
+            "references": [
+              {
+                "root": "/r",
+                "pipelineId": "p",
+                "block": "step"
+              }
+            ]
+          }
+        },
+        {
+          "name": "unknown-unchecked-reason",
+          "why": "Unchecked reasons are a closed set.",
+          "body": {
+            "error": "referenced",
+            "message": "m",
+            "unchecked": [
+              {
+                "root": "/r",
+                "reason": "gone"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

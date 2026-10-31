@@ -30,6 +30,15 @@ export const kafkaTopicSchema = z
   .max(249)
   .describe('A Kafka topic name, using the characters Kafka itself accepts.');
 
+export const kafkaConnectionNameSchema = z
+  .string()
+  .regex(new RegExp('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'))
+  .min(1)
+  .max(64)
+  .describe(
+    "The name of a Kafka connection kept by the agent outside the pipeline file (#24): a letter or digit, then letters, digits, dots, underscores or hyphens, at most 64 characters. schema/connection.schema.json $defs/connectionName holds the same rule for the connection's own name, and generation fails when the two differ.",
+  );
+
 export const fieldPathSchema = z
   .string()
   .min(1)
@@ -74,6 +83,7 @@ export const kafkaSourceBlockSchema = z
         'Type discriminator. Exactly one value, so a step of another type matches no branch of the union.',
       ),
     topic: kafkaTopicSchema,
+    connection: kafkaConnectionNameSchema.optional(),
     consumerGroupId: z
       .string()
       .min(1)
@@ -104,6 +114,7 @@ export const kafkaDestinationBlockSchema = z
         'Type discriminator. Exactly one value, so a step of another type matches no branch of the union.',
       ),
     topic: kafkaTopicSchema,
+    connection: kafkaConnectionNameSchema.optional(),
     acks: z
       .enum(['0', '1', 'all'])
       .describe("Producer acknowledgement setting, using Kafka's own values.")

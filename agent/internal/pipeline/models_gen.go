@@ -336,11 +336,45 @@ func (j *Identifier) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// The name of a Kafka connection kept by the agent outside the pipeline file
+// (#24): a letter or digit, then letters, digits, dots, underscores or hyphens, at
+// most 64 characters. schema/connection.schema.json $defs/connectionName holds the
+// same rule for the connection's own name, and generation fails when the two
+// differ.
+type KafkaConnectionName string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *KafkaConnectionName) UnmarshalJSON(value []byte) error {
+	type Plain KafkaConnectionName
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, string(plain)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "", `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	}
+	if utf8.RuneCountInString(string(plain)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "", 1)
+	}
+	if utf8.RuneCountInString(string(plain)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "", 64)
+	}
+	*j = KafkaConnectionName(plain)
+	return nil
+}
+
 // Block table: Kafka Destination. Configures the output topic and producer
 // behavior.
 type KafkaDestinationBlock struct {
 	// Producer acknowledgement setting, using Kafka's own values.
 	Acks KafkaDestinationBlockAcks `json:"acks,omitempty,omitzero" yaml:"acks,omitempty"`
+
+	// The name of the Kafka connection this block writes to. The connection itself,
+	// its bootstrap servers and its credentials, is kept by the agent outside the
+	// pipeline file (#24), so this file names it and holds nothing else of it. Absent
+	// means the block names no connection yet. A name no stored connection has is
+	// still valid here: the schema cannot see the store.
+	Connection *KafkaConnectionName `json:"connection,omitempty,omitzero" yaml:"connection,omitempty"`
 
 	// ID corresponds to the JSON schema field "id".
 	ID Identifier `json:"id" yaml:"id"`
@@ -457,6 +491,13 @@ func (j *KafkaDestinationBlock) UnmarshalJSON(value []byte) error {
 type KafkaSourceBlock struct {
 	// Where to start when the consumer group has no committed offset.
 	AutoOffsetReset KafkaSourceBlockAutoOffsetReset `json:"autoOffsetReset,omitempty,omitzero" yaml:"autoOffsetReset,omitempty"`
+
+	// The name of the Kafka connection this block reads from. The connection itself,
+	// its bootstrap servers and its credentials, is kept by the agent outside the
+	// pipeline file (#24), so this file names it and holds nothing else of it. Absent
+	// means the block names no connection yet. A name no stored connection has is
+	// still valid here: the schema cannot see the store.
+	Connection *KafkaConnectionName `json:"connection,omitempty,omitzero" yaml:"connection,omitempty"`
 
 	// Consumer group to join. Absent means the agent generates one per pipeline.
 	ConsumerGroupID *string `json:"consumerGroupId,omitempty,omitzero" yaml:"consumerGroupId,omitempty"`

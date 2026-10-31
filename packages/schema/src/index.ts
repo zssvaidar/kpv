@@ -6,8 +6,8 @@
 // Everything about either comes from a JSON Schema in schema/, which is the
 // single source of truth: the types and the Zod schemas in ./generated are
 // generated from schema/pipeline.schema.json, schema/channel.schema.json,
-// schema/directory.schema.json, schema/roots.schema.json and
-// schema/pipelines.schema.json by
+// schema/directory.schema.json, schema/roots.schema.json,
+// schema/pipelines.schema.json and schema/connection.schema.json by
 // `pnpm run generate` and are never hand-edited. This file only decides what
 // the package exposes.
 
@@ -54,6 +54,34 @@ export { rootsJsonSchema } from './generated/roots-json-schema.js';
 export type * from './generated/pipelines-types.js';
 export * from './generated/pipelines-zod.js';
 export { pipelinesJsonSchema } from './generated/pipelines-json-schema.js';
+
+// The connection endpoints (#24): a Kafka connection record with its
+// credentials, an update and a delete, the list and the name list without
+// credentials, and the error a request that could not be served gets.
+// Generated from schema/connection.schema.json, the same file the agent's Go
+// structs come from.
+export type * from './generated/connection-types.js';
+export * from './generated/connection-zod.js';
+export { connectionJsonSchema } from './generated/connection-json-schema.js';
+
+// The connection combination rules the schema states in prose, which the Go
+// agent implements again in internal/connections/rules.go.
+export type {
+  ConnectionIssue,
+  ConnectionRule,
+  ConnectionRuleViolation,
+  ConnectionValidationError,
+} from './connection-rules.js';
+export {
+  connectionIssues,
+  connectionRuleViolations,
+  connectionZodSchema,
+  protocolAllowsSasl,
+  protocolAllowsTls,
+  saslFields,
+  tlsFields,
+  validateConnection,
+} from './connection-rules.js';
 
 // Validation: the schema plus the annotation rules it carries.
 export type { PipelineValidationError } from './validate.js';

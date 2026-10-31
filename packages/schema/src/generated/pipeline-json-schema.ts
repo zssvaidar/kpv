@@ -81,6 +81,15 @@ export const pipelineJsonSchema: Readonly<Record<string, unknown>> = {
       maxLength: 249,
       pattern: '^[A-Za-z0-9._-]+$',
     },
+    kafkaConnectionName: {
+      title: 'KafkaConnectionName',
+      description:
+        "The name of a Kafka connection kept by the agent outside the pipeline file (#24): a letter or digit, then letters, digits, dots, underscores or hyphens, at most 64 characters. schema/connection.schema.json $defs/connectionName holds the same rule for the connection's own name, and generation fails when the two differ.",
+      type: 'string',
+      minLength: 1,
+      maxLength: 64,
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$',
+    },
     fieldPath: {
       title: 'FieldPath',
       description:
@@ -139,6 +148,11 @@ export const pipelineJsonSchema: Readonly<Record<string, unknown>> = {
         topic: {
           $ref: '#/$defs/kafkaTopic',
         },
+        connection: {
+          $ref: '#/$defs/kafkaConnectionName',
+          description:
+            'The name of the Kafka connection this block reads from. The connection itself, its bootstrap servers and its credentials, is kept by the agent outside the pipeline file (#24), so this file names it and holds nothing else of it. Absent means the block names no connection yet. A name no stored connection has is still valid here: the schema cannot see the store.',
+        },
         consumerGroupId: {
           description:
             'Consumer group to join. Absent means the agent generates one per pipeline.',
@@ -177,6 +191,11 @@ export const pipelineJsonSchema: Readonly<Record<string, unknown>> = {
         },
         topic: {
           $ref: '#/$defs/kafkaTopic',
+        },
+        connection: {
+          $ref: '#/$defs/kafkaConnectionName',
+          description:
+            'The name of the Kafka connection this block writes to. The connection itself, its bootstrap servers and its credentials, is kept by the agent outside the pipeline file (#24), so this file names it and holds nothing else of it. Absent means the block names no connection yet. A name no stored connection has is still valid here: the schema cannot see the store.',
         },
         acks: {
           description:

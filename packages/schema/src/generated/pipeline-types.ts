@@ -13,6 +13,10 @@ export type Language = 'python' | 'typescript' | 'go';
  */
 export type KafkaTopic = string;
 /**
+ * The name of the Kafka connection this block reads from. The connection itself, its bootstrap servers and its credentials, is kept by the agent outside the pipeline file (#24), so this file names it and holds nothing else of it. Absent means the block names no connection yet. A name no stored connection has is still valid here: the schema cannot see the store.
+ */
+export type KafkaConnectionName = string;
+/**
  * Payload formats the MVP supports. A block that leaves it out is read as json.
  */
 export type MessageFormat = 'json' | 'text';
@@ -29,6 +33,10 @@ export type Expression = string;
  * A dotted path into a JSON payload, for example order.total.
  */
 export type FieldPath = string;
+/**
+ * The name of the Kafka connection this block writes to. The connection itself, its bootstrap servers and its credentials, is kept by the agent outside the pipeline file (#24), so this file names it and holds nothing else of it. Absent means the block names no connection yet. A name no stored connection has is still valid here: the schema cannot see the store.
+ */
+export type KafkaConnectionName1 = string;
 /**
  * Payload formats the MVP supports. A block that leaves it out is read as json.
  */
@@ -62,6 +70,7 @@ export interface KafkaSourceBlock {
    */
   type: 'kafkaSource';
   topic: KafkaTopic;
+  connection?: KafkaConnectionName;
   /**
    * Consumer group to join. Absent means the agent generates one per pipeline.
    */
@@ -200,6 +209,7 @@ export interface KafkaDestinationBlock {
    */
   type: 'kafkaDestination';
   topic: KafkaTopic;
+  connection?: KafkaConnectionName1;
   /**
    * Producer acknowledgement setting, using Kafka's own values.
    */

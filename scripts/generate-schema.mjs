@@ -6,7 +6,7 @@
 // it, and `pnpm run generate:check` (which CI runs) regenerates and fails when
 // the committed output differs, which is also what catches a hand-edit.
 //
-// There are five schemas, and they are separate files because they describe
+// There are six schemas, and they are separate files because they describe
 // separate things:
 //   - schema/pipeline.schema.json   the pipeline model
 //   - schema/channel.schema.json    the envelope the agent pushes over the
@@ -21,6 +21,11 @@
 //                                   answer (#48): the pipeline list, an
 //                                   opened pipeline, a create request or an
 //                                   error
+//   - schema/connection.schema.json what the connection endpoints take and
+//                                   answer (#24): a connection record with
+//                                   its credentials, an update, a delete,
+//                                   the list without credentials, the name
+//                                   list, or an error
 // Each one generates the same four artifacts: TypeScript types, Zod schemas,
 // the raw schema as a module, and Go structs plus a copy of the schema the Go
 // module can embed.
@@ -117,6 +122,24 @@ const schemas = [
     goFile: 'pipelines_models_gen.go',
     // The open answer, the create request and the error are definitions the
     // list does not refer to, and a client needs every one of them.
+    unreachableDefinitions: true,
+  },
+  {
+    file: 'connection.schema.json',
+    prefix: 'connection',
+    rootName: 'ConnectionList',
+    rootConst: 'connectionListSchema',
+    rawConst: 'connectionJsonSchema',
+    goPackage: 'httpapi',
+    goDir: join('agent', 'internal', 'httpapi'),
+    goFile: 'connections_models_gen.go',
+    // internal/connections validates a connection against the schema itself,
+    // and httpapi may not import embed, so that package gets a copy of its
+    // own to embed. It gets no Go structs: the generated Connection holds the
+    // credentials as strings, and the store holds them as secrets.Secret.
+    extraSchemaCopies: [join('agent', 'internal', 'connections')],
+    // The record, the update, the delete, the name list and the error are
+    // definitions the list does not refer to, and a client needs them all.
     unreachableDefinitions: true,
   },
 ];
@@ -324,6 +347,71 @@ const assertTheRootReasonsMatch = (byFile) => {
   }
 };
 
+/**
+ * A pipeline's Kafka block names a connection, and the connection schema
+ * defines what a connection's name is. The two files cannot share a `$ref`,
+ * so the rule is written twice and this keeps the copies the same: a name one
+ * accepts and the other refuses would make a reference no connection can
+ * satisfy, or a connection no pipeline can name.
+ */
+const assertTheConnectionNameRulesMatch = (byFile) => {
+  const rule = (node) =>
+    node === undefined
+      ? undefined
+      : JSON.stringify({
+          type: node.type,
+          minLength: node.minLength,
+          maxLength: node.maxLength,
+          pattern: node.pattern,
+        });
+  const named = rule(
+    byFile['pipeline.schema.json']?.$defs?.kafkaConnectionName,
+  );
+  const own = rule(byFile['connection.schema.json']?.$defs?.connectionName);
+  if (named === undefined || own === undefined) {
+    throw new Error(
+      'the pipeline kafkaConnectionName or the connection connectionName definition is gone, so nothing is holding the two schemas to the same names',
+    );
+  }
+  if (named !== own) {
+    throw new Error(
+      [
+        'a pipeline and the connection store disagree about what a connection name is:',
+        `  schema/pipeline.schema.json   $defs/kafkaConnectionName  ${named}`,
+        `  schema/connection.schema.json $defs/connectionName       ${own}`,
+        'Make them the same, so a pipeline cannot name a connection no connection can be called.',
+      ].join('\n'),
+    );
+  }
+};
+
+/**
+ * A reference check reports a pipeline the list could not read with the
+ * list's own reason, so the connection schema's unchecked reasons start with
+ * the pipeline list's unreadable kinds, in the same order.
+ */
+const assertTheUncheckedReasonsMatch = (byFile) => {
+  const kinds = byFile['pipelines.schema.json']?.$defs?.unreadableKind?.enum;
+  const reasons =
+    byFile['connection.schema.json']?.$defs?.uncheckedReason?.enum;
+  if (!Array.isArray(kinds) || !Array.isArray(reasons)) {
+    throw new Error(
+      'the pipelines unreadableKind or the connection uncheckedReason enum is gone, so nothing is holding them to the same reasons',
+    );
+  }
+  if (
+    JSON.stringify(reasons.slice(0, kinds.length)) !== JSON.stringify(kinds)
+  ) {
+    throw new Error(
+      [
+        'the connection reference check and the pipeline list disagree about why a pipeline did not load:',
+        `  schema/pipelines.schema.json  $defs/unreadableKind/enum   ${JSON.stringify(kinds)}`,
+        `  schema/connection.schema.json $defs/uncheckedReason/enum  ${JSON.stringify(reasons)}`,
+      ].join('\n'),
+    );
+  }
+};
+
 // --- Zod ---------------------------------------------------------------------
 
 const zodModuleFor = (schema, spec) => {
@@ -433,6 +521,12 @@ const generate = async (spec, schema, schemaSource) => {
   mkdirSync(goDir, { recursive: true });
   writeFileSync(goSchemaCopy, schemaSource);
   written.push(goSchemaCopy);
+  for (const extra of spec.extraSchemaCopies ?? []) {
+    const copy = join(repoRoot, extra, spec.file);
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, schemaSource);
+    written.push(copy);
+  }
 
   const goModels = join(goDir, spec.goFile ?? 'models_gen.go');
   execFileSync(
@@ -471,6 +565,8 @@ const main = async () => {
   }
   assertThePipelineIDPatternMatches(byFile);
   assertTheRootReasonsMatch(byFile);
+  assertTheConnectionNameRulesMatch(byFile);
+  assertTheUncheckedReasonsMatch(byFile);
 
   for (const { spec, schema, source } of sources) {
     await generate(spec, schema, source);
