@@ -14,6 +14,11 @@ import (
 // uses 40 for the same job.
 const maxSymlinkHops = 40
 
+// readlinkAttempts is how many times walk reads a link that is the same file
+// at every look and whose Readlink keeps failing, before that failure is
+// taken to be real.
+const readlinkAttempts = 3
+
 var (
 	// errTooManyLinks is a path with more symbolic links on it than will be
 	// followed, which is how a link cycle shows up.
@@ -31,6 +36,18 @@ var (
 	// when a component's Lstat and its open disagree, and it is reported the
 	// same way rather than as an I/O failure.
 	errLinkChanged = errors.New("a symbolic link on this path changed while it was being read")
+)
+
+// linkStep is the moment walk's test hook is called in, for one link.
+type linkStep int
+
+const (
+	// beforeReadlink is after a name's Lstat said it is a link, or after
+	// the second Lstat saw the same link again, and before its Readlink.
+	beforeReadlink linkStep = iota
+	// beforeRecheck is after a Readlink failed and before the name is
+	// looked at again.
+	beforeRecheck
 )
 
 // segment is one component of the path being walked, and whether it came from
@@ -130,15 +147,26 @@ func realPath(raw string) (reached string, missing []string, err error) {
 //
 // A name that Lstat reports as a symbolic link can be replaced or removed
 // before its target is read. When Readlink then fails, the name is looked at
-// again: if it is no longer a link, or is gone, the walk fails with
+// again: if it is no longer a link, is gone, or is not the same file the
+// first Lstat saw (a link put back as a new one), the walk fails with
 // errLinkChanged wrapping the Readlink error, which the guard reports as
-// KindChanged. Any other Readlink failure is returned as it is. This is
-// decided by the second Lstat and not by matching an errno.
+// KindChanged. This is decided by the second Lstat and not by matching an
+// errno.
 //
-// between, when not nil, is called with a link's path after its Lstat and
-// before its Readlink, which is how a test changes the link in that moment.
-// Every caller outside tests passes nil.
-func walk(raw string, inside func(string) bool, between func(link string)) (reached string, missing []string, err error) {
+// A link that looks like the same file again is not proof that nothing
+// changed: a name flipped from a link to a directory and back to a new link
+// can be given the old link's inode number, so the second Lstat sees the
+// same file although the Readlink met a directory. Such a name is read
+// again, up to readlinkAttempts times in all, and a Readlink that succeeds
+// is followed like any other. Only a name that is the same link at every
+// look and fails every Readlink keeps its error and its kind, which is what
+// a real failure to read an unchanged link does.
+//
+// between, when not nil, is called with a link's path and beforeReadlink
+// before each Readlink, and with beforeRecheck before each second Lstat after
+// one failed. That is how a test changes the link in those moments. Every
+// caller outside tests passes nil.
+func walk(raw string, inside func(string) bool, between func(link string, step linkStep)) (reached string, missing []string, err error) {
 	parts := givenSegments(raw)
 	current := string(filepath.Separator)
 	currentIsDirectory := true
@@ -200,15 +228,8 @@ func walk(raw string, inside func(string) bool, between func(link string)) (reac
 		if hops > maxSymlinkHops {
 			return fail(index, errTooManyLinks)
 		}
-		if between != nil {
-			between(next)
-		}
-		target, linkErr := os.Readlink(next)
+		target, linkErr := readLink(next, info, between)
 		if linkErr != nil {
-			if again, againErr := os.Lstat(next); errors.Is(againErr, fs.ErrNotExist) ||
-				(againErr == nil && again.Mode()&fs.ModeSymlink == 0) {
-				linkErr = fmt.Errorf("%w: %w", errLinkChanged, linkErr)
-			}
 			return fail(index, linkErr)
 		}
 		// Splice the link's target in front of whatever is left of the path,
@@ -228,6 +249,44 @@ func walk(raw string, inside func(string) bool, between func(link string)) (reac
 		}
 	}
 	return current, missing, nil
+}
+
+// readLink reads the target of the link at path, which Lstat reported as
+// seen, looking again after each failure as walk describes: a name that is
+// no longer that link is errLinkChanged, and one that still is is read again,
+// up to readlinkAttempts times in all.
+func readLink(path string, seen fs.FileInfo, between func(link string, step linkStep)) (string, error) {
+	var linkErr error
+	for attempt := 0; attempt < readlinkAttempts; attempt++ {
+		if between != nil {
+			between(path, beforeReadlink)
+		}
+		var target string
+		target, linkErr = os.Readlink(path)
+		if linkErr == nil {
+			return target, nil
+		}
+		if between != nil {
+			between(path, beforeRecheck)
+		}
+		if linkChanged(path, seen) {
+			return "", fmt.Errorf("%w: %w", errLinkChanged, linkErr)
+		}
+	}
+	return "", linkErr
+}
+
+// linkChanged reports whether the name at path is no longer the symbolic link
+// the walk's Lstat reported as seen: gone, no longer a link, or a different
+// file. The last covers a link replaced and then put back as a new link
+// between the Lstat and the Readlink, which a check of the mode alone would
+// see as the same link. Any other failure to look again is not a change.
+func linkChanged(path string, seen fs.FileInfo) bool {
+	again, err := os.Lstat(path)
+	if err != nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return again.Mode()&fs.ModeSymlink == 0 || !os.SameFile(seen, again)
 }
 
 // tailClimbsOut applies the climb rule to the part of a path the filesystem

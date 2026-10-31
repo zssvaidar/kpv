@@ -424,9 +424,10 @@ func (g *Guard) resolve(op, given string) (Path, error) {
 }
 
 // resolveWith is resolve with walk's between hook, called after a link's
-// Lstat and before its Readlink, which is how a test changes the link in that
-// moment. resolve passes none.
-func (g *Guard) resolveWith(op, given string, between func(link string)) (Path, error) {
+// Lstat and before its Readlink, and again before the second Lstat when that
+// Readlink failed, which is how a test changes the link in those moments.
+// resolve passes none.
+func (g *Guard) resolveWith(op, given string, between func(link string, step linkStep)) (Path, error) {
 	if err := usablePath(given); err != nil {
 		var fault *PathError
 		if errors.As(err, &fault) {

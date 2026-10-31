@@ -362,29 +362,103 @@ func TestRacingTheSwapNeverReadsOutsideTheRoot(t *testing.T) {
 // A name the walk saw as a symbolic link can stop being one before its target
 // is read. That is the same race Pin refuses when a component's Lstat and its
 // open disagree, and Resolve reports it the same way: KindChanged, never an
-// I/O failure. The hook runs in exactly that moment, so each case is
+// I/O failure. The hook runs in exactly those moments, before the Readlink
+// and, when it failed, before the name is looked at again, so each case is
 // deterministic rather than a race that has to be won.
 func TestALinkThatChangesBeforeItIsReadIsRefusedAsChanged(t *testing.T) {
 	t.Parallel()
+	remove := func(t *testing.T, name string) {
+		t.Helper()
+		if err := os.Remove(name); err != nil {
+			t.Fatalf("remove %s: %v", name, err)
+		}
+	}
+	mkdir := func(t *testing.T, name string) {
+		t.Helper()
+		if err := os.Mkdir(name, 0o755); err != nil {
+			t.Fatalf("make %s a directory: %v", name, err)
+		}
+	}
+	aside := func(t *testing.T, name string) {
+		t.Helper()
+		if err := os.Rename(name, name+".aside"); err != nil {
+			t.Fatalf("move %s aside: %v", name, err)
+		}
+	}
+	back := func(t *testing.T, name string) {
+		t.Helper()
+		if err := os.Rename(name+".aside", name); err != nil {
+			t.Fatalf("put %s back: %v", name, err)
+		}
+	}
+	// restored is only for the case that puts the link back once; each
+	// subtest runs once, so sharing it is safe.
+	restored := false
 	cases := []struct {
-		name   string
-		change func(t *testing.T, link string)
+		name string
+		// change is called at each step; steps lists the steps the hook
+		// must be called with, in order.
+		change func(t *testing.T, link string, step linkStep)
+		steps  []linkStep
 		want   ErrorKind
 	}{
-		{"replaced by a directory", func(t *testing.T, link string) {
-			if err := os.Remove(link); err != nil {
-				t.Fatalf("remove %s: %v", link, err)
+		{"replaced by a directory", func(t *testing.T, link string, step linkStep) {
+			if step == beforeReadlink {
+				remove(t, link)
+				mkdir(t, link)
 			}
-			if err := os.Mkdir(link, 0o755); err != nil {
-				t.Fatalf("make %s a directory: %v", link, err)
+		}, []linkStep{beforeReadlink, beforeRecheck}, KindChanged},
+		{"removed", func(t *testing.T, link string, step linkStep) {
+			if step == beforeReadlink {
+				remove(t, link)
 			}
-		}, KindChanged},
-		{"removed", func(t *testing.T, link string) {
-			if err := os.Remove(link); err != nil {
-				t.Fatalf("remove %s: %v", link, err)
+		}, []linkStep{beforeReadlink, beforeRecheck}, KindChanged},
+		// Link, then a directory for the Readlink, then a new link to the
+		// same target by the time the name is looked at again. The old link
+		// is kept under another name so the new one cannot reuse its inode:
+		// the name is a link both times, and only its identity shows that it
+		// changed.
+		{"replaced by a directory and then by a different link", func(t *testing.T, link string, step linkStep) {
+			switch step {
+			case beforeReadlink:
+				aside(t, link)
+				mkdir(t, link)
+			case beforeRecheck:
+				remove(t, link)
+				if err := os.Symlink("inside", link); err != nil {
+					t.Fatalf("put a new link at %s: %v", link, err)
+				}
 			}
-		}, KindChanged},
-		{"left alone", func(*testing.T, string) {}, ""},
+		}, []linkStep{beforeReadlink, beforeRecheck}, KindChanged},
+		// The same link put back after the directory, which is also what a
+		// new link that reused the old one's inode looks like: the second
+		// Lstat cannot tell, so the name is read again, and that Readlink
+		// succeeds.
+		{"replaced by a directory and then by the same link", func(t *testing.T, link string, step linkStep) {
+			if step == beforeReadlink && !restored {
+				aside(t, link)
+				mkdir(t, link)
+			}
+			if step == beforeRecheck {
+				remove(t, link)
+				back(t, link)
+				restored = true
+			}
+		}, []linkStep{beforeReadlink, beforeRecheck, beforeReadlink}, ""},
+		// The same flip before every Readlink: the name is the same link at
+		// every look and no Readlink succeeds, which is what a real failure
+		// to read an unchanged link looks like, so it keeps its kind.
+		{"a directory at every read and the same link at every look", func(t *testing.T, link string, step linkStep) {
+			switch step {
+			case beforeReadlink:
+				aside(t, link)
+				mkdir(t, link)
+			case beforeRecheck:
+				remove(t, link)
+				back(t, link)
+			}
+		}, []linkStep{beforeReadlink, beforeRecheck, beforeReadlink, beforeRecheck, beforeReadlink, beforeRecheck}, KindIO},
+		{"left alone", func(*testing.T, string, linkStep) {}, []linkStep{beforeReadlink}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -394,17 +468,17 @@ func TestALinkThatChangesBeforeItIsReadIsRefusedAsChanged(t *testing.T) {
 			linkPath := f.in("dir")
 			through := f.in("dir", "ok.txt")
 
-			calls := 0
-			resolved, err := f.guard.resolveWith("resolve", through, func(link string) {
-				calls++
+			var steps []linkStep
+			resolved, err := f.guard.resolveWith("resolve", through, func(link string, step linkStep) {
+				steps = append(steps, step)
 				if link != linkPath {
 					t.Errorf("the hook was called for %s, want the link %s", link, linkPath)
 					return
 				}
-				tc.change(t, link)
+				tc.change(t, link, step)
 			})
-			if calls != 1 {
-				t.Errorf("the hook was called %d times, want once", calls)
+			if fmt.Sprint(steps) != fmt.Sprint(tc.steps) {
+				t.Errorf("the hook was called with steps %v, want %v", steps, tc.steps)
 			}
 			if tc.want == "" {
 				if err != nil {

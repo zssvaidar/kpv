@@ -45,7 +45,11 @@ func outsidePipe(snap map[string]string, pipe string) map[string]string {
 
 // A link anywhere in the pipeline directory's path, whether it was there when
 // the call was made or swapped in between Resolve and Pin, is the guard's
-// changed, and nothing is read or written.
+// changed, and nothing is read or written. The hook runs after Resolve and
+// before anything on disk is looked at through its Path, and the swapped-in
+// link has an absolute or a relative target: an absolute one followed by an
+// os.Root call would be answered as an escape, forbidden, rather than as the
+// link it is.
 func TestALinkInThePipelinePathIsRefusedChanged(t *testing.T) {
 	t.Parallel()
 	calls := map[string]func(p *project, dir string) error{
@@ -60,7 +64,7 @@ func TestALinkInThePipelinePathIsRefusedChanged(t *testing.T) {
 		"read": func(p *project, dir string) error { _, err := p.files.ReadEnv(dir); return err },
 	}
 	for call, run := range calls {
-		for _, swapped := range []string{"given", "pipeline", "ancestor"} {
+		for _, swapped := range []string{"given", "pipeline", "pipeline relative", "ancestor", "ancestor relative"} {
 			t.Run(call+" "+swapped, func(t *testing.T) {
 				t.Parallel()
 				p := newProjectAt(t, filepath.Join("group", "pipe"))
@@ -78,9 +82,17 @@ func TestALinkInThePipelinePathIsRefusedChanged(t *testing.T) {
 					p.files.hooks.beforePin = func() {
 						swapForLink(t, p.pipe, filepath.Join(p.root, "group", "sibling"))
 					}
+				case "pipeline relative":
+					p.files.hooks.beforePin = func() {
+						swapForLink(t, p.pipe, "sibling")
+					}
 				case "ancestor":
 					p.files.hooks.beforePin = func() {
 						swapForLink(t, filepath.Join(p.root, "group"), filepath.Join(p.root, "other"))
+					}
+				case "ancestor relative":
+					p.files.hooks.beforePin = func() {
+						swapForLink(t, filepath.Join(p.root, "group"), "other")
 					}
 				}
 				before := snapshot(t, filepath.Dir(p.root))
@@ -116,6 +128,28 @@ func TestALinkInThePipelinePathIsRefusedChanged(t *testing.T) {
 			})
 		}
 	}
+}
+
+// The pipeline directory is first looked at on disk by Pin. One that is a
+// file is still reported as not a directory, and one with a file above it as
+// the guard's notDirectory, and nothing is written.
+func TestAPipelineDirectoryThatIsNotADirectoryIsReported(t *testing.T) {
+	t.Parallel()
+	p := newProject(t)
+	file := filepath.Join(p.root, "file")
+	write(t, file, "x\n")
+	before := snapshot(t, p.root)
+	_, err := p.files.WriteEnv(context.Background(), file, secretsOf(map[string]string{"K": canary}), nil)
+	problems := refusedWith(t, err, KindNotRegularFile)
+	if problems[0].Guard != projectfs.KindNotDirectory {
+		t.Errorf("the pipeline directory as a file is Guard %q, want %q", problems[0].Guard, projectfs.KindNotDirectory)
+	}
+	_, err = p.files.WriteEnv(context.Background(), filepath.Join(file, "pipe"), secretsOf(map[string]string{"K": canary}), nil)
+	problems = refusedWith(t, err, KindRefused)
+	if problems[0].Guard != projectfs.KindNotDirectory {
+		t.Errorf("a file above the pipeline directory is Guard %q, want %q", problems[0].Guard, projectfs.KindNotDirectory)
+	}
+	sameSnapshot(t, before, snapshot(t, p.root))
 }
 
 // A relative pipeline directory is resolved against the working directory,

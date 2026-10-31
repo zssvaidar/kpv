@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -38,8 +39,9 @@ type hooks struct {
 	// envEmit runs while the new .env is being written to its temporary
 	// file, which exists then; an error from it fails the write there.
 	envEmit func() error
-	// beforePin runs after the pipeline directory was resolved and checked,
-	// just before it is pinned.
+	// beforePin runs after the pipeline directory was resolved by the guard
+	// and before anything on disk is looked at through it: just before it
+	// is pinned.
 	beforePin func()
 	// beforeGitignore runs after every check, just before the .gitignore
 	// write.
@@ -376,39 +378,33 @@ func (f *Files) resolve(dir string) (projectfs.Path, *Problem, error) {
 		}
 		return projectfs.Path{}, &Problem{Kind: KindRefused, Guard: projectfs.KindChanged, Message: notRealPath}, err
 	}
-	// Lstat, not Stat: the path is real, so a link at it now was swapped in
-	// after Resolve, and following it is what the pin is there to prevent.
-	info, err := directory.Lstat()
-	if err != nil {
-		problem := guardProblem("", err)
-		return projectfs.Path{}, &problem, err
-	}
-	if info.Mode()&fs.ModeSymlink != 0 {
-		err := &projectfs.PathError{
-			Op: "resolve", Path: dir, Resolved: directory.Real(), Root: directory.Root(),
-			Kind: projectfs.KindChanged, Message: notRealPath,
-		}
-		return projectfs.Path{}, &Problem{Kind: KindRefused, Guard: projectfs.KindChanged, Message: notRealPath}, err
-	}
-	if !info.IsDir() {
-		return projectfs.Path{}, &Problem{
-			Kind: KindNotRegularFile, Guard: projectfs.KindNotDirectory,
-			Message: "the pipeline directory is not a directory",
-		}, nil
-	}
+	// Nothing on disk is looked at through the unpinned Path. An ancestor
+	// swapped for a link after Resolve would be followed by such a call and,
+	// with an absolute target, answered as forbidden; Pin walks each name
+	// without following links and refuses that link as changed, and it is
+	// also what checks the directory is one.
 	return directory, nil, nil
 }
 
 const notRealPath = "the pipeline directory was not given as its real path: a component of it is a symbolic link, or it is a relative path"
 
-// pin holds the resolved pipeline directory open for the rest of the call. A
-// component that is now a link is the guard's changed.
+// pin holds the resolved pipeline directory open for the rest of the call,
+// and is the first thing that looks at it on disk. A component that is now a
+// link, wherever it points, is the guard's changed; a pipeline directory that
+// is not a directory is reported as such.
 func (f *Files) pin(directory projectfs.Path) (*projectfs.PinnedDir, *Problem, error) {
 	if f.hooks.beforePin != nil {
 		f.hooks.beforePin()
 	}
 	pinned, err := directory.Pin()
 	if err != nil {
+		var fault *projectfs.PathError
+		if errors.As(err, &fault) && fault.Kind == projectfs.KindNotDirectory && fault.Location == directory.Rel() {
+			return nil, &Problem{
+				Kind: KindNotRegularFile, Guard: projectfs.KindNotDirectory,
+				Message: "the pipeline directory is not a directory",
+			}, nil
+		}
 		problem := guardProblem("", err)
 		return nil, &problem, err
 	}
