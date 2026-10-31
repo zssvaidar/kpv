@@ -104,7 +104,8 @@ describe('the form as it starts', () => {
       'deadLetter',
       'fail',
     ]);
-    expect(stepChoices.onInvalid.defaultValue).toBe('drop');
+    expect(stepChoices.onInvalid.startsWith).toBe('drop');
+    expect(stepChoices.onInvalid).not.toHaveProperty('defaultValue');
     expect(stepChoices.fieldType.options).toEqual([
       'string',
       'number',
@@ -117,7 +118,7 @@ describe('the form as it starts', () => {
     expect(stepChoices.required.defaultValue).toBe(true);
   });
 
-  it('the onInvalid default is what a newly inserted validate step holds', () => {
+  it('the onInvalid a form starts with is what a newly inserted validate step holds', () => {
     const inserted = insertStep(
       graphFixtures['zero-processing-steps'],
       { before: { role: 'source' }, after: { role: 'destination' } },
@@ -127,7 +128,7 @@ describe('the form as it starts', () => {
     expect(step?.type).toBe('validate');
     if (step?.type === 'validate') {
       expect(step.configuration.onInvalid).toBe(
-        stepChoices.onInvalid.defaultValue,
+        stepChoices.onInvalid.startsWith,
       );
     }
   });

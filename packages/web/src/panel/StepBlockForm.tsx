@@ -302,7 +302,7 @@ function ValidateFields(props: {
       rules: draft.rules.map((each, i) => (i === index ? row : each)),
     });
   const requiredDefault = stepChoices.required.defaultValue;
-  const { options, defaultValue } = stepChoices.onInvalid;
+  const { options, startsWith } = stepChoices.onInvalid;
   return (
     <>
       <fieldset className="form-rows" data-field="rules">
@@ -382,11 +382,9 @@ function ValidateFields(props: {
         value={draft.onInvalid}
         options={options.map((value) => ({
           value,
-          label: `${said(value, onInvalidMeaning)}${
-            value === defaultValue ? ', the default' : ''
-          }`,
+          label: said(value, onInvalidMeaning),
         }))}
-        hint={`${stepFieldDescription.onInvalid} The default, which a new validate step starts with, is ${defaultValue}.`}
+        hint={`${stepFieldDescription.onInvalid} A new validate step starts with ${startsWith}.`}
         onChange={(onInvalid) => change({ ...draft, onInvalid })}
       />
       <TextField

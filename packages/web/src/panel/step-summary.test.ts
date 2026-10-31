@@ -195,6 +195,20 @@ describe('a validate step', () => {
     );
   });
 
+  it('never calls an action the default', () => {
+    const rules = [{ field: 'id' }];
+    for (const onInvalid of ['drop', 'deadLetter', 'fail']) {
+      for (const deadLetterTopic of [undefined, 'dlq']) {
+        expect(
+          text(validate({ rules, onInvalid, deadLetterTopic })),
+        ).not.toMatch(/default/i);
+      }
+    }
+    expect(text(newStep('validate', 'v') as ValidateStep)).not.toMatch(
+      /default/i,
+    );
+  });
+
   it('says it is not configured when no rule is set', () => {
     const summary = summarizeStep(validate({ rules: [], onInvalid: 'drop' }));
     expect(summary.state).toBe('empty');

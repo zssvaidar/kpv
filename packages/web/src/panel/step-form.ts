@@ -101,10 +101,11 @@ const ruleShape = validateConfiguration.rules.element.shape;
 
 /**
  * The values the schema allows for each choice, and what applies when it is
- * left unset. onInvalid is required and the schema states no default for
- * it, so its default is the one a new validate step starts with
- * (newStepConfiguration in graph/edit.ts), which is what a person sees
- * picked until they choose another.
+ * left unset. onInvalid is different: it is required and has no default,
+ * because each action trades data loss against availability and the
+ * pipeline's author chooses one. The form never calls any action a default;
+ * startsWith is only the value a newly inserted validate step holds
+ * (newStepConfiguration in graph/edit.ts).
  */
 export const stepChoices = {
   keepOnMatch: {
@@ -121,7 +122,7 @@ export const stepChoices = {
   },
   onInvalid: {
     options: validateConfiguration.onInvalid.options as readonly string[],
-    defaultValue: newStepConfiguration.validate.onInvalid as string,
+    startsWith: newStepConfiguration.validate.onInvalid as string,
   },
 } as const;
 

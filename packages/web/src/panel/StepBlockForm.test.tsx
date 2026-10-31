@@ -169,7 +169,7 @@ describe('the validate form', () => {
     );
   });
 
-  it('offers only the actions the schema allows, with the default visible', () => {
+  it('offers only the actions the schema allows, with no blank option', () => {
     const html = render('require-amount');
     const select = field(html, 'onInvalid');
     const values = [...select.matchAll(/<option value="([^"]*)"/g)].map(
@@ -179,14 +179,30 @@ describe('the validate form', () => {
     expect(values).toEqual(['drop', 'deadLetter', 'fail']);
     // No blank choice: the action is required.
     expect(values).not.toContain('');
-    expect(select).toContain('drop (drop the message), the default');
     expect(select).toContain(
-      'The default, which a new validate step starts with, is drop.',
+      '<option value="drop">drop (drop the message)</option>',
     );
+    expect(select).toContain('A new validate step starts with drop.');
     expect(select).toMatch(/<option value="deadLetter" selected="">/);
   });
 
-  it('a newly inserted validate step shows the default picked and says it is not configured yet', () => {
+  it('calls no action the default, for a step set to deadLetter or any other action', () => {
+    for (const onInvalid of ['deadLetter', 'drop', 'fail']) {
+      const html = render(
+        'require-amount',
+        onInvalid === 'deadLetter'
+          ? null
+          : typed('require-amount', { onInvalid }),
+      );
+      expect(field(html, 'onInvalid')).toMatch(
+        new RegExp(`<option value="${onInvalid}" selected="">`),
+      );
+      expect(field(html, 'onInvalid')).not.toMatch(/default/i);
+      expect(summaryOf(html)).not.toMatch(/default/i);
+    }
+  });
+
+  it('a newly inserted validate step starts with drop selected, not called the default, and says it is not configured yet', () => {
     const inserted = insertStep(
       graphFixtures['zero-processing-steps'],
       { before: { role: 'source' }, after: { role: 'destination' } },
@@ -197,8 +213,10 @@ describe('the validate form', () => {
     expect(field(html, 'onInvalid')).toMatch(
       /<option value="drop" selected="">/,
     );
+    expect(field(html, 'onInvalid')).not.toMatch(/default/i);
     expect(html).toContain('data-summary-state="placeholder"');
     expect(text(summaryOf(html))).toContain('Not configured yet');
+    expect(summaryOf(html)).not.toMatch(/default/i);
   });
 
   it('shows an inline error and does not save a topic the schema rejects', () => {
