@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,21 +80,28 @@ func TestNoCredentialAppearsInAnyAnswerErrorOrLogLine(t *testing.T) {
 			}
 		}
 	}
-	// Every store failure: the file's directory cannot be written, so every
-	// save answers io.
-	if os.Geteuid() != 0 {
-		directory := filepath.Dir(w.file)
-		if err := os.Chmod(directory, 0o500); err != nil {
-			t.Fatal(err)
-		}
-		_, err := w.store.Create(draft(with(map[string]any{"name": "io"})))
-		record(err)
-		_, err = w.store.Update(draft(update("leak", with(nil), nil)))
-		record(err)
-		_ = os.Chmod(directory, 0o700)
-		if KindOf(err) != KindIO {
-			t.Fatalf("a failed write = %v", err)
-		}
+	// Every store failure: a directory has taken the store file's place, so
+	// every write fails.
+	if err := os.Remove(w.file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(w.file, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := w.store.Create(draft(with(map[string]any{"name": "io"})))
+	record(err)
+	if KindOf(err) != KindIO {
+		t.Fatalf("a failed write = %v", err)
+	}
+	_, err = w.store.Update(draft(update("leak", with(nil), nil)))
+	record(err)
+	_, err = w.store.Delete(draft(map[string]any{"name": "leak", "confirm": true}))
+	record(err)
+	if KindOf(err) != KindIO {
+		t.Fatalf("a failed delete = %v", err)
+	}
+	if err := os.Remove(w.file); err != nil {
+		t.Fatal(err)
 	}
 	// A corrupt store holding the credentials is logged by kind only.
 	writeFile(t, w.file, "{"+knownPassword+p.key)

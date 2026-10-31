@@ -30,6 +30,7 @@ import (
 
 	"github.com/zssvaidar/kpv/agent/internal/catalog"
 	"github.com/zssvaidar/kpv/agent/internal/channel"
+	"github.com/zssvaidar/kpv/agent/internal/connections"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 )
 
@@ -89,6 +90,11 @@ type Options struct {
 	// (#48), built over the same Roots. The caller owns it. A nil Pipelines
 	// serves none of those routes, and they answer the uniform rejection.
 	Pipelines *catalog.Catalog
+	// Connections is what the connection endpoints list, create, update and
+	// delete through (#24), whose reference check reads the same catalog. The
+	// caller owns it. A nil Connections serves none of those routes, and they
+	// answer the uniform rejection.
+	Connections *connections.Store
 }
 
 // Server is the agent's local HTTP API, bound and ready to serve.
@@ -149,7 +155,7 @@ func New(options Options) (*Server, error) {
 	channelOptions.AllowedOrigins = origins.origins()
 	hub := channel.New(channelOptions)
 
-	g := &guard{token: token, origins: origins, logger: logger, channel: hub, browser: options.Browser, roots: options.Roots, pipelines: options.Pipelines}
+	g := &guard{token: token, origins: origins, logger: logger, channel: hub, browser: options.Browser, roots: options.Roots, pipelines: options.Pipelines, connections: options.Connections}
 	server := &Server{
 		token:    token,
 		listener: listener,

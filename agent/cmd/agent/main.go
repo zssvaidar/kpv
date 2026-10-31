@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/zssvaidar/kpv/agent/internal/catalog"
+	"github.com/zssvaidar/kpv/agent/internal/connections"
 	"github.com/zssvaidar/kpv/agent/internal/httpapi"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 	"github.com/zssvaidar/kpv/agent/internal/version"
@@ -53,7 +54,17 @@ func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
 		_ = browser.Close()
 		return nil, err
 	}
-	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser, Roots: roots, Pipelines: pipelines})
+	// The named Kafka connections (#24) are kept in a file of the agent's own
+	// beside the roots store, which is what keeps them outside every root;
+	// with no store there, they last as long as the process. Their reference
+	// check reads the pipeline list.
+	connectionsFile, err := projectfs.OpenPrivateFile(roots, connectionsStoreName)
+	if err != nil {
+		_ = browser.Close()
+		return nil, err
+	}
+	store := connections.Open(connectionsFile, pipelines, logger)
+	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser, Roots: roots, Pipelines: pipelines, Connections: store})
 	if err != nil {
 		_ = browser.Close()
 		return nil, err
@@ -101,6 +112,11 @@ func newBrowser(logger *slog.Logger) (*projectfs.Guard, *projectfs.Browser, erro
 // Linux, falling back to ~/.config/kpv. It is the agent's own file, never one
 // inside a project or the repository.
 const rootsStoreName = "roots.json"
+
+// connectionsStoreName is the file the named Kafka connections are kept in
+// (#24), beside rootsStoreName: the agent's own, 0600, never inside a
+// project. It holds credentials, which is why it is there and nowhere else.
+const connectionsStoreName = "connections.json"
 
 // storeFile is where the authorized roots are stored, or "" when there is no
 // config directory to keep them in, in which case they last as long as the

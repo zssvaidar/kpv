@@ -27,7 +27,9 @@ type route struct {
 // browsing endpoint and the project root endpoints, which are not rows here
 // (see directoriesPattern and rootsListPattern) and reach it only through the
 // projectfs.Browser and projectfs.Roots the guard carries, and the pipeline
-// endpoints, which reach it only through the catalog.Catalog it carries.
+// endpoints, which reach it only through the catalog.Catalog it carries, and
+// the connection endpoints, which reach it only through the
+// connections.Store it carries.
 func apiRoutes() []route {
 	return []route{
 		{"GET /api/health", handleHealth},
@@ -63,6 +65,13 @@ func newHandler(g *guard, routes []route) http.Handler {
 	mux.Handle(pipelinesListPattern, g.pipelinesListRoute())
 	mux.Handle(pipelinesOpenPattern, g.pipelinesOpenRoute())
 	mux.Handle(pipelinesCreatePattern, g.pipelinesCreateRoute())
+	// The connection endpoints (#24), for the same reason again; see
+	// connectionsListPattern in connections.go.
+	mux.Handle(connectionsListPattern, g.connectionsListRoute())
+	mux.Handle(connectionsNamesPattern, g.connectionsNamesRoute())
+	mux.Handle(connectionsCreatePattern, g.connectionsCreateRoute())
+	mux.Handle(connectionsUpdatePattern, g.connectionsUpdateRoute())
+	mux.Handle(connectionsDeletePattern, g.connectionsDeleteRoute())
 	return g.wrap(mux)
 }
 

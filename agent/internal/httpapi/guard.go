@@ -7,6 +7,7 @@ import (
 
 	"github.com/zssvaidar/kpv/agent/internal/catalog"
 	"github.com/zssvaidar/kpv/agent/internal/channel"
+	"github.com/zssvaidar/kpv/agent/internal/connections"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 )
 
@@ -57,6 +58,11 @@ type guard struct {
 	// also carries. A nil pipelines answers those routes with the uniform
 	// rejection.
 	pipelines *catalog.Catalog
+	// connections is what the connection endpoints list, create, update and
+	// delete through (#24), carried here for the same reason again. It answers
+	// summaries without credentials; this package never calls its in-process
+	// read. A nil connections answers those routes with the uniform rejection.
+	connections *connections.Store
 }
 
 // wrap returns next behind the checks. Every request, including one that

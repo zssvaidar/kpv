@@ -416,3 +416,39 @@ func TestTheServedHandlerIsExactlyTheGuardedOne(t *testing.T) {
 		t.Fatal("the server serves a nil handler, which means http.DefaultServeMux")
 	}
 }
+
+// The generated Connection and ConnectionUpdate hold the credentials as
+// strings, so no handler decodes into them: connection bodies are read token
+// by token into a connections.Draft, credentials as secrets.Secret (#24). And
+// the store's in-process read with credentials, Get, is for #68 and #25,
+// never a handler.
+func TestNoHandlerHoldsACredentialAsAString(t *testing.T) {
+	t.Parallel()
+	fileSet, files := parsePackage(t)
+	sawDraft := false
+	for name, file := range files {
+		if strings.HasSuffix(name, "_gen.go") {
+			continue
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.Ident:
+				if typed.Name == "Connection" || typed.Name == "ConnectionUpdate" {
+					t.Errorf("%s uses the generated %s, which holds credentials as strings", name, typed.Name)
+				}
+			case *ast.SelectorExpr:
+				written := source(t, fileSet, typed)
+				if typed.Sel.Name == "Get" && strings.Contains(written, "connections") {
+					t.Errorf("%s calls %s, the in-process read with credentials", name, written)
+				}
+				if written == "connections.Draft" {
+					sawDraft = true
+				}
+			}
+			return true
+		})
+	}
+	if !sawDraft {
+		t.Fatal("no file builds a connections.Draft, so this test is looking at the wrong thing")
+	}
+}

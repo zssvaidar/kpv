@@ -9,18 +9,19 @@ Adding a route
 - `newHandler` in `routes.go` is the only place a mux exists, and it returns
   it wrapped in the one `guard`. Request-and-answer routes that read nothing
   are rows in `apiRoutes()` (`/api/health`, `/api/version`); the channel,
-  `/api/directories`, `/api/roots` and `/api/pipelines` are registered in
-  `newHandler` itself, because the row tests hold every row to answering `200`
-  with a JSON object
+  `/api/directories`, `/api/roots`, `/api/pipelines` and `/api/connections`
+  are registered in `newHandler` itself, because the row tests hold every row
+  to answering `200` with a JSON object
 - `TestOnlyNewHandlerBuildsAMuxAndItWrapsIt`,
   `TestTheServedHandlerIsExactlyTheGuardedOne` (`source_test.go`) and
   `TestANewlyAddedRouteCannotSkipTheChecks` (`guard_test.go`) fail a route
   registered any other way; `channel_test.go` fails when something is
   registered that no test covers. A new endpoint gets its own rejection matrix
-  test, as `directories_test.go`, `roots_test.go` and `pipelines_test.go` have
+  test, as `directories_test.go`, `roots_test.go`, `pipelines_test.go` and
+  `connections_test.go` have
 - an error answers a kind and a fixed sentence from the table in its handler
-  file (`directories.go`, `roots.go`, `pipelines.go`, which also hold the
-  status per kind), never text from the underlying error: a `projectfs`
+  file (`directories.go`, `roots.go`, `pipelines.go`, `connections.go`, which
+  also hold the status per kind), never text from the underlying error: a `projectfs`
   refusal can describe what is outside the roots. The pipeline errors' schema
   problems are the one exception: they describe the document, not the disk
 - a request body is `application/json` and bounded; `/api/roots` reads it
@@ -28,6 +29,30 @@ Adding a route
   else), because `encoding/json` keeps the last of two keys and matches keys
   case-insensitively (`roots.go`). `POST /api/pipelines` reads its six string
   fields the same way (at most 8192 bytes, each once, spelled exactly)
+- the connection bodies (`POST`, `PUT`, `DELETE /api/connections`) are read the
+  same way, at most 262144 bytes (`maxConnectionRequestBytes`: three PEM
+  fields of up to 65536 characters and the rest), each field once and spelled
+  exactly, and no object anywhere inside. A body over the cap is refused
+  `invalid` without being read further or echoed
+
+The connection endpoints (`connections.go`, #24)
+
+- `GET /api/connections` lists summaries, `GET /api/connections/names` only
+  the names (#12's select; empty store, empty list), `POST` creates, `PUT`
+  updates the connection named `current`, `DELETE` deletes and answers what is
+  left. They go through the `*connections.Store` in `Options.Connections`,
+  wired in `cmd/agent/main.go` with the same catalog for its reference check
+- a credential (`saslPassword`, `tlsClientKey`) is wrapped in a
+  `secrets.Secret` the moment its token is read (`connections.Credential`),
+  never decoded into the generated `Connection` or `ConnectionUpdate`, which
+  hold them as strings, and the store's in-process `Get` is never called here
+  (`TestNoHandlerHoldsACredentialAsAString`). A summary says only
+  `saslPasswordSet` and `tlsClientKeySet`
+- `invalid` carries problems (a field pointer and a sentence that quotes no
+  value); `referenced` carries the pipelines that name the connection and the
+  places that could not be checked, and the request sent again with
+  `confirm` goes ahead. `connections_test.go` has the leak test over every
+  route and failure, response bodies and log lines
 
 The pipeline endpoints (`pipelines.go`, #48)
 

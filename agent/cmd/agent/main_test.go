@@ -279,3 +279,75 @@ func TestTheStartedAgentListsCreatesAndOpensPipelines(t *testing.T) {
 		t.Fatalf("the log names the root:\n%s", logged.String())
 	}
 }
+
+// The named Kafka connections (#24) are kept in kpv/connections.json beside
+// the roots store, owner-only, and a restarted agent lists them again. The
+// directory holding them cannot be authorized as a project.
+func TestTheStartedAgentKeepsItsConnectionsBesideTheRootsStore(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(base, "home")
+	config := filepath.Join(home, ".config")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", config)
+
+	run := func(steps func(do func(method, path, body string) (int, string))) {
+		var printed, logged bytes.Buffer
+		server, err := start(&printed, slog.New(slog.NewTextHandler(&logged, nil)))
+		if err != nil {
+			t.Fatalf("start the agent: %v", err)
+		}
+		go func() { _ = server.Serve() }()
+		defer func() { _ = server.Close() }()
+		secret := server.Token().Secret()
+		steps(func(method, path, body string) (int, string) {
+			request, err := http.NewRequestWithContext(t.Context(), method, server.URL()+path, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+secret)
+			request.Header.Set("Origin", server.URL())
+			request.Header.Set("Content-Type", "application/json")
+			answer, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = answer.Body.Close() }()
+			read, _ := io.ReadAll(answer.Body)
+			return answer.StatusCode, string(read)
+		})
+		if strings.Contains(logged.String(), "kpv-main-test-password") {
+			t.Fatal("the log holds the password")
+		}
+	}
+	run(func(do func(method, path, body string) (int, string)) {
+		status, body := do(http.MethodPost, "/api/connections",
+			`{"name":"local","bootstrapServers":["localhost:9092"],"securityProtocol":"SASL_PLAINTEXT",`+
+				`"saslMechanism":"PLAIN","saslUsername":"u","saslPassword":"kpv-main-test-password"}`)
+		if status != http.StatusOK || strings.Contains(body, "kpv-main-test-password") || !strings.Contains(body, `"saslPasswordSet":true`) {
+			t.Fatalf("create answered %d %s", status, body)
+		}
+		for _, holder := range []string{config, filepath.Join(config, "kpv")} {
+			status, body = do(http.MethodPost, "/api/roots", `{"path":`+strconv.Quote(holder)+`}`)
+			if status != http.StatusForbidden || !strings.Contains(body, `"forbidden"`) {
+				t.Fatalf("authorizing %s answered %d %s", holder, status, body)
+			}
+		}
+	})
+	stored := filepath.Join(config, "kpv", "connections.json")
+	info, err := os.Stat(stored)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the connection store is not where it is documented, owner-only: %v %v", info, err)
+	}
+	run(func(do func(method, path, body string) (int, string)) {
+		status, body := do(http.MethodGet, "/api/connections/names", "")
+		if status != http.StatusOK || body != `{"names":["local"]}`+"\n" {
+			t.Fatalf("after the restart, the names are %d %s", status, body)
+		}
+	})
+}
