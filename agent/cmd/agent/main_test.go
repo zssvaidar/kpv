@@ -211,3 +211,71 @@ func TestTheStartedAgentKeepsItsAuthorizedRootsAcrossARestart(t *testing.T) {
 		t.Fatalf("after the restart, the root browses as %d %s", status, body)
 	}
 }
+
+// The started agent serves the pipeline list, create and open (#48) over the
+// roots it authorized, through the same guard.
+func TestTheStartedAgentListsCreatesAndOpensPipelines(t *testing.T) {
+	isolateConfig(t)
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temporary directory: %v", err)
+	}
+	home := filepath.Join(base, "home")
+	project := filepath.Join(home, "code")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatalf("make the project: %v", err)
+	}
+	t.Setenv("HOME", home)
+	var printed, logged bytes.Buffer
+	server, err := start(&printed, slog.New(slog.NewTextHandler(&logged, nil)))
+	if err != nil {
+		t.Fatalf("start the agent: %v", err)
+	}
+	go func() { _ = server.Serve() }()
+	defer func() { _ = server.Close() }()
+	do := func(method, path, body string) (int, string) {
+		t.Helper()
+		var sent io.Reader
+		if body != "" {
+			sent = strings.NewReader(body)
+		}
+		request, err := http.NewRequestWithContext(t.Context(), method, server.URL()+path, sent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+server.Token().Secret())
+		request.Header.Set("Origin", server.URL())
+		if body != "" {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		answer, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = answer.Body.Close() }()
+		read, _ := io.ReadAll(answer.Body)
+		return answer.StatusCode, string(read)
+	}
+	if status, body := do(http.MethodPost, "/api/roots", `{"path":`+strconv.Quote(project)+`}`); status != http.StatusOK {
+		t.Fatalf("authorize answered %d %s", status, body)
+	}
+	status, body := do(http.MethodPost, "/api/pipelines", `{"root":`+strconv.Quote(project)+
+		`,"name":"Orders","language":"go","sourceTopic":"in","destinationTopic":"out","networkMode":"docker"}`)
+	if status != http.StatusOK || !strings.Contains(body, `"directory":"orders"`) {
+		t.Fatalf("create answered %d %s", status, body)
+	}
+	if _, err := os.Stat(filepath.Join(project, "orders", "pipeline.yaml")); err != nil {
+		t.Fatalf("the pipeline file is not there: %v", err)
+	}
+	status, body = do(http.MethodGet, "/api/pipelines", "")
+	if status != http.StatusOK || !strings.Contains(body, `"id":"orders"`) {
+		t.Fatalf("the list is %d %s", status, body)
+	}
+	status, body = do(http.MethodGet, "/api/pipelines/open?root="+url.QueryEscape(project)+"&directory=orders", "")
+	if status != http.StatusOK || !strings.Contains(body, `"sha256"`) {
+		t.Fatalf("open answered %d %s", status, body)
+	}
+	if strings.Contains(logged.String(), project) {
+		t.Fatalf("the log names the root:\n%s", logged.String())
+	}
+}

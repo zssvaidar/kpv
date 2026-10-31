@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/zssvaidar/kpv/agent/internal/catalog"
 	"github.com/zssvaidar/kpv/agent/internal/channel"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 )
@@ -50,6 +51,12 @@ type guard struct {
 	// directory may be a root and hands back strings, never a Guard or a
 	// Path. A nil roots answers those routes with the uniform rejection.
 	roots *projectfs.Roots
+	// pipelines is what the pipeline endpoints list, open and create through
+	// (#48), carried here for the same reason again. It answers kinds,
+	// locations and JSON, and this package never touches the parsed model it
+	// also carries. A nil pipelines answers those routes with the uniform
+	// rejection.
+	pipelines *catalog.Catalog
 }
 
 // wrap returns next behind the checks. Every request, including one that

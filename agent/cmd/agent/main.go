@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/zssvaidar/kpv/agent/internal/catalog"
 	"github.com/zssvaidar/kpv/agent/internal/httpapi"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 	"github.com/zssvaidar/kpv/agent/internal/version"
@@ -36,7 +37,7 @@ func main() {
 // reaches the browser. The logger deliberately gets the address only, so a
 // redirected log never contains the token.
 func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
-	browser, err := newBrowser(logger)
+	guard, browser, err := newBrowser(logger)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,14 @@ func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
 		_ = browser.Close()
 		return nil, err
 	}
-	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser, Roots: roots})
+	// The pipeline list, open and create (#48) read and write through the
+	// guard the roots are authorized into.
+	pipelines, err := catalog.New(roots, guard, logger)
+	if err != nil {
+		_ = browser.Close()
+		return nil, err
+	}
+	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser, Roots: roots, Pipelines: pipelines})
 	if err != nil {
 		_ = browser.Close()
 		return nil, err
@@ -64,26 +72,28 @@ func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
 
 // newBrowser builds what the directory browsing endpoint reads through: the
 // guard holding the authorized project roots, which starts with none, plus the
-// user's home directory as a browse-only allowance.
+// user's home directory as a browse-only allowance. The guard is returned too,
+// for the pipeline catalog, which reads and writes through it.
 //
 // A home directory that cannot be found or opened is not a failed startup:
 // the agent still serves, and browsing is then limited to the authorized
 // roots. Which home it was is not logged, only that there is none.
-func newBrowser(logger *slog.Logger) (*projectfs.Browser, error) {
+func newBrowser(logger *slog.Logger) (*projectfs.Guard, *projectfs.Browser, error) {
 	guard, err := projectfs.New()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	home, err := os.UserHomeDir()
 	if err == nil {
 		browser, browseErr := projectfs.NewBrowser(guard, home)
 		if browseErr == nil {
-			return browser, nil
+			return guard, browser, nil
 		}
 		err = browseErr
 	}
 	logger.Warn("the home directory cannot be browsed, so only authorized project directories can", "kind", string(projectfs.KindOf(err)))
-	return projectfs.NewBrowser(guard, "")
+	browser, err := projectfs.NewBrowser(guard, "")
+	return guard, browser, err
 }
 
 // rootsStoreName is the file the authorized project roots are kept in (#63),

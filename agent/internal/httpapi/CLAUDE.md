@@ -9,22 +9,35 @@ Adding a route
 - `newHandler` in `routes.go` is the only place a mux exists, and it returns
   it wrapped in the one `guard`. Request-and-answer routes that read nothing
   are rows in `apiRoutes()` (`/api/health`, `/api/version`); the channel,
-  `/api/directories` and `/api/roots` are registered in `newHandler` itself,
-  because the row tests hold every row to answering `200` with a JSON object
+  `/api/directories`, `/api/roots` and `/api/pipelines` are registered in
+  `newHandler` itself, because the row tests hold every row to answering `200`
+  with a JSON object
 - `TestOnlyNewHandlerBuildsAMuxAndItWrapsIt`,
   `TestTheServedHandlerIsExactlyTheGuardedOne` (`source_test.go`) and
   `TestANewlyAddedRouteCannotSkipTheChecks` (`guard_test.go`) fail a route
   registered any other way; `channel_test.go` fails when something is
   registered that no test covers. A new endpoint gets its own rejection matrix
-  test, as `directories_test.go` and `roots_test.go` have
+  test, as `directories_test.go`, `roots_test.go` and `pipelines_test.go` have
 - an error answers a kind and a fixed sentence from the table in its handler
-  file (`directories.go`, `roots.go`, which also hold the status per kind),
-  never text from the underlying error: a `projectfs` refusal can describe what
-  is outside the roots
+  file (`directories.go`, `roots.go`, `pipelines.go`, which also hold the
+  status per kind), never text from the underlying error: a `projectfs`
+  refusal can describe what is outside the roots. The pipeline errors' schema
+  problems are the one exception: they describe the document, not the disk
 - a request body is `application/json` and bounded; `/api/roots` reads it
   token by token (at most 4096 bytes, one object, `path` once and nothing
   else), because `encoding/json` keeps the last of two keys and matches keys
-  case-insensitively (`roots.go`)
+  case-insensitively (`roots.go`). `POST /api/pipelines` reads its six string
+  fields the same way (at most 8192 bytes, each once, spelled exactly)
+
+The pipeline endpoints (`pipelines.go`, #48)
+
+- `GET /api/pipelines` lists, `GET /api/pipelines/open?root=&directory=` opens
+  (`directory` left out for a root that is itself the pipeline; empty is
+  `invalid`), `POST /api/pipelines` creates. They go through the
+  `*catalog.Catalog` in `Options.Pipelines`, wired in `cmd/agent/main.go`. This
+  package only converts its answers; it never touches the parsed model, and a
+  `catalog.Entry`'s real directory path is not sent: an answer carries no path
+  but the listed root and directory
 
 The checks every request gets (`guard.go`, `origin.go`, `guard_test.go`,
 `origin_test.go`)

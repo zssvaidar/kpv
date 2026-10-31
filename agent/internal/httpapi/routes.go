@@ -26,8 +26,8 @@ type route struct {
 // of the build. The routes that reach the filesystem are the directory
 // browsing endpoint and the project root endpoints, which are not rows here
 // (see directoriesPattern and rootsListPattern) and reach it only through the
-// projectfs.Browser and projectfs.Roots the guard carries. internal/pipeline is still not wired up: its store hands back a
-// path to open, which is the weaker route #6 documented, and #48 moves it.
+// projectfs.Browser and projectfs.Roots the guard carries, and the pipeline
+// endpoints, which reach it only through the catalog.Catalog it carries.
 func apiRoutes() []route {
 	return []route{
 		{"GET /api/health", handleHealth},
@@ -58,6 +58,11 @@ func newHandler(g *guard, routes []route) http.Handler {
 	mux.Handle(rootsListPattern, g.rootsListRoute())
 	mux.Handle(rootsAuthorizePattern, g.rootsAuthorizeRoute())
 	mux.Handle(rootsRevokePattern, g.rootsRevokeRoute())
+	// The pipeline endpoints (#48), for the same reason again; see
+	// pipelinesListPattern in pipelines.go.
+	mux.Handle(pipelinesListPattern, g.pipelinesListRoute())
+	mux.Handle(pipelinesOpenPattern, g.pipelinesOpenRoute())
+	mux.Handle(pipelinesCreatePattern, g.pipelinesCreateRoute())
 	return g.wrap(mux)
 }
 
