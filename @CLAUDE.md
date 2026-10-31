@@ -21,6 +21,8 @@ Areas
 - `agent/internal/pipeline/CLAUDE.md` - reading and writing `pipeline.yaml`
 - `agent/internal/projectfs/CLAUDE.md` - the path guard and authorized project
   roots
+- `agent/internal/codegen/CLAUDE.md` - generating files into `generated/`, the
+  manifest, and the boundary with the user's `src/`
 - `agent/internal/httpapi/CLAUDE.md` - the local HTTP API: token, origin,
   routes
 - `agent/internal/channel/CLAUDE.md` - the WebSocket push channel

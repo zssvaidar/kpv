@@ -18,6 +18,10 @@ These rules are tests that read the non-test source, so breaking one fails
   `path/filepath`, `os/exec`, `internal/pipeline` or `internal/httpapi`, and no
   identifier or string in it may contain token, secret, password, credential,
   authorization or bearer (`internal/channel/source_test.go`)
+- `internal/codegen` imports `internal/projectfs` and `internal/pipeline` and
+  nothing else in the agent, nor `os` or `path/filepath`; `internal/httpapi`,
+  `internal/channel`, `internal/projectfs` and `internal/pipeline` do not
+  import it (`internal/codegen/source_test.go`)
 - `internal/projectfs` and `internal/pipeline` import no other agent package.
   No test holds this; it is true today (`go list -f '{{.Imports}}' ./...`)
 
