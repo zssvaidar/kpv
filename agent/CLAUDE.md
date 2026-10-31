@@ -22,6 +22,10 @@ These rules are tests that read the non-test source, so breaking one fails
   nothing else in the agent, nor `os` or `path/filepath`; `internal/httpapi`,
   `internal/channel`, `internal/projectfs` and `internal/pipeline` do not
   import it (`internal/codegen/source_test.go`)
+- `internal/secrets` imports `internal/projectfs` and nothing else in the
+  agent, nor `os` or `path/filepath`; `internal/projectfs`, `internal/pipeline`,
+  `internal/codegen` and `internal/channel` do not import it
+  (`internal/secrets/source_test.go`)
 - `internal/projectfs` and `internal/pipeline` import no other agent package.
   No test holds this; it is true today (`go list -f '{{.Imports}}' ./...`)
 

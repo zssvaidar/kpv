@@ -23,6 +23,8 @@ Areas
   roots
 - `agent/internal/codegen/CLAUDE.md` - generating files into `generated/`, the
   manifest, and the boundary with the user's `src/`
+- `agent/internal/secrets/CLAUDE.md` - the secret type, and the merged writes
+  of `.env` and `.gitignore` at a pipeline root
 - `agent/internal/httpapi/CLAUDE.md` - the local HTTP API: token, origin,
   routes
 - `agent/internal/channel/CLAUDE.md` - the WebSocket push channel
