@@ -1,11 +1,11 @@
 # @kpv/web
 
-Vite + React in strict TypeScript: the shell, the graph editor, the side
-panel, the directory picker, and the one client for the agent. Tests run in
-Node through the root `vitest.config.ts`: components are rendered to a string
-and code is handed its window, fetch and timers, so there is no DOM. There are
-two `tsc` projects: `src/` (`tsconfig.json`) and `dev/` plus `vite.config.ts`
-(`tsconfig.node.json`).
+Vite + React in strict TypeScript: the shell, the pipeline list, the graph
+editor, the side panel, the directory picker, and the one client for the
+agent. Tests run in Node through the root `vitest.config.ts`: components are
+rendered to a string and code is handed its window, fetch and timers, so there
+is no DOM. There are two `tsc` projects: `src/` (`tsconfig.json`) and `dev/`
+plus `vite.config.ts` (`tsconfig.node.json`).
 
 Rules a change can break
 
@@ -35,6 +35,14 @@ Rules a change can break
   given. The panel forms (`src/panel/*-form.ts`) check as you type with the
   same `schemaIssues` and save through `updateKafkaBlock` and `updateStep`
   there (`edit.test.ts`, `kafka-form.test.ts`, `step-form.test.ts`)
+- the pipeline list (`src/pipelines/`, #48) is the graph area's entry screen.
+  It opens an entry by the root and directory the agent listed, never a path
+  it builds, and draws the answer only after `schemaIssues` accepts it: a
+  document that fails is shown unreadable with its problems, never drawn, and
+  there is no form-level fallback. The create form checks every field with
+  `schemaIssues` too (`create-form.ts`) and preselects nothing the schema
+  gives no default. Words for every kind are in `pipelines/words.ts`; an
+  unavailable root uses the picker's `unavailableWords`
 - `src/connection/monitor.ts` holds the connection state the status bar shows.
   The channel WebSocket is the liveness signal; on a drop one request says why,
   and it reconnects with backoff (`backoff.ts`: 250ms doubling to 10s) unless

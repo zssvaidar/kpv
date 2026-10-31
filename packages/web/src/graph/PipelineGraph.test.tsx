@@ -174,7 +174,7 @@ describe('the selection in the side panel', () => {
     const html = renderToStaticMarkup(
       <Shell state={{ status: 'connected' }} client={null} />,
     );
-    expect(html).toContain('No pipeline open.');
+    expect(html).toContain('no pipeline can be listed');
     expect(html).not.toContain('data-selected');
   });
 });

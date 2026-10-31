@@ -395,3 +395,44 @@ body,
 .form-row .form-field {
   margin: 0.25rem 0;
 }
+
+/* The pipeline list (#48). */
+
+.pipelines-header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.pipelines-header h1 {
+  margin: 0 auto 0 0;
+  font-size: 1.25rem;
+}
+
+.pipeline-root h2 {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.pipeline-entries {
+  list-style: none;
+  padding: 0;
+}
+
+.pipeline-entry {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid GrayText;
+}
+
+.create-pipeline label {
+  display: block;
+  margin: 0.25rem 0;
+}
+
+.field-problem,
+.pipelines-error,
+.pipelines-problem {
+  display: block;
+  color: CanvasText;
+  font-style: italic;
+}

@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import { reopenAdvice } from '../connection/describe.ts';
 import { createConnectionMonitor } from '../connection/monitor.ts';
+import { fakeAgent, json } from '../picker/fake-agent.ts';
+import { createPipelinesController } from '../pipelines/controller.ts';
+import { fixtureList, pipelinesFixtures } from '../pipelines/fixtures.ts';
 import { App, Shell } from './App.tsx';
 
 // What a person reads, without the markup: React escapes quotes in text.
@@ -48,6 +51,73 @@ describe('Shell', () => {
     expect(refused).toContain('data-state="unauthenticated"');
     expect(absent).toContain('data-state="unreachable"');
     expect(refused).not.toBe(absent);
+  });
+});
+
+describe('the pipeline list as the entry screen', () => {
+  async function listedController() {
+    const agent = fakeAgent();
+    const controller = createPipelinesController(agent.client);
+    controller.setOnline(true);
+    agent
+      .next('GET', '/api/pipelines')
+      .answer(json(200, fixtureList('every-state')));
+    await agent.settle();
+    return { agent, controller };
+  }
+
+  it('shows the list in the graph area when connected and nothing is open', async () => {
+    const { controller } = await listedController();
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipelines={controller}
+      />,
+    );
+    expect(html).toContain('id="pipelines-heading"');
+    expect(text(html)).toContain('/home/user/code/app');
+    expect(html).toContain('id="directory-picker"');
+    expect(html).not.toContain('react-flow');
+  });
+
+  it('draws an opened entry in the graph, with a way back to the list', async () => {
+    const { agent, controller } = await listedController();
+    controller.open({ root: '/home/user/code/app', directory: 'billing' });
+    agent
+      .next('GET', '/api/pipelines/open')
+      .answer(json(200, pipelinesFixtures.documents.valid[0]?.body));
+    await agent.settle();
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipelines={controller}
+      />,
+    );
+    expect(html).toContain('react-flow');
+    expect(text(html)).toContain('Back to the pipelines');
+    expect(html).not.toContain('id="pipelines-heading"');
+  });
+
+  it('shows a failed open in place of the graph, and draws nothing', async () => {
+    const { agent, controller } = await listedController();
+    controller.open({ root: '/home/user/code/app', directory: 'hand-edited' });
+    const unreadable = pipelinesFixtures.errors.valid.find(
+      (c) => c.name === 'unreadable',
+    )?.body;
+    agent.next('GET', '/api/pipelines/open').answer(json(422, unreadable));
+    await agent.settle();
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipelines={controller}
+      />,
+    );
+    expect(html).toContain('aria-label="Pipeline not opened"');
+    expect(html).not.toContain('react-flow');
+    expect(html).not.toContain('Kafka');
   });
 });
 

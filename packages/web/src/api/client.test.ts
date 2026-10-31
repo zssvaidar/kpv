@@ -74,6 +74,23 @@ const everyRequest: [string, (api: AgentClient) => Promise<unknown>][] = [
   ['listRoots', (api) => api.listRoots()],
   ['authorizeRoot', (api) => api.authorizeRoot('/home/user/code')],
   ['revokeRoot', (api) => api.revokeRoot('/home/user/code')],
+  ['listPipelines', (api) => api.listPipelines()],
+  [
+    'openPipeline',
+    (api) => api.openPipeline({ root: '/home/user/code', directory: 'a' }),
+  ],
+  [
+    'createPipeline',
+    (api) =>
+      api.createPipeline({
+        root: '/home/user/code',
+        name: 'Orders',
+        language: 'go',
+        sourceTopic: 'in',
+        destinationTopic: 'out',
+        networkMode: 'docker',
+      }),
+  ],
 ];
 
 describe('createAgentClient', () => {
@@ -98,9 +115,12 @@ describe('createAgentClient', () => {
     const { api } = client(() => json(200, listing));
     expect(Object.keys(api).sort()).toEqual([
       'authorizeRoot',
+      'createPipeline',
       'listDirectories',
+      'listPipelines',
       'listRoots',
       'openChannel',
+      'openPipeline',
       'probe',
       'revokeRoot',
     ]);
@@ -286,6 +306,93 @@ describe('the roots methods', () => {
       await client(() =>
         json(200, { path: '/x', available: true }),
       ).api.authorizeRoot('/x'),
+    ).toEqual({ kind: 'failed', status: 200 });
+  });
+});
+
+describe('the pipeline methods', () => {
+  const list = {
+    roots: [
+      {
+        path: '/home/user/code',
+        available: true,
+        truncated: false,
+        skippedLinks: 0,
+        pipelines: [
+          {
+            root: '/home/user/code',
+            directory: 'orders',
+            readable: true,
+            id: 'orders',
+            language: 'go',
+          },
+        ],
+      },
+    ],
+  };
+  const document = {
+    root: '/home/user/code',
+    directory: 'orders',
+    pipeline: { id: 'orders' },
+    sha256: 'a'.repeat(64),
+  };
+
+  it('lists the pipelines with GET /api/pipelines and the generated schema', async () => {
+    const { api, sent } = client(() => json(200, list));
+    expect(await api.listPipelines()).toEqual({ kind: 'ok', value: list });
+    const url = new URL(sent[0]?.url ?? '');
+    expect(url.pathname).toBe('/api/pipelines');
+    expect(url.search).toBe('');
+    expect(sent[0]?.init?.method).toBe('GET');
+  });
+
+  it('opens by root and directory only, and leaves the directory out for a root pipeline', async () => {
+    const { api, sent } = client(() => json(200, document));
+    expect(
+      await api.openPipeline({ root: '/home/user/code', directory: 'orders' }),
+    ).toEqual({ kind: 'ok', value: document });
+    await api.openPipeline({ root: '/home/user/single' });
+    const first = new URL(sent[0]?.url ?? '');
+    expect(first.pathname).toBe('/api/pipelines/open');
+    expect([...first.searchParams.keys()]).toEqual(['root', 'directory']);
+    expect(first.searchParams.get('root')).toBe('/home/user/code');
+    expect(first.searchParams.get('directory')).toBe('orders');
+    const second = new URL(sent[1]?.url ?? '');
+    expect([...second.searchParams.keys()]).toEqual(['root']);
+  });
+
+  it('creates with a JSON body of exactly the request fields', async () => {
+    const { api, sent } = client(() => json(200, document));
+    const request = {
+      root: '/home/user/code',
+      name: 'Orders',
+      language: 'go',
+      sourceTopic: 'in',
+      destinationTopic: 'out',
+      networkMode: 'docker',
+    };
+    expect(await api.createPipeline({ ...request })).toEqual({
+      kind: 'ok',
+      value: document,
+    });
+    expect(sent[0]?.init?.method).toBe('POST');
+    const headers = new Headers(sent[0]?.init?.headers);
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(JSON.parse(sent[0]?.init?.body as string)).toEqual(request);
+  });
+
+  it("reads a typed error as the endpoint's own, and anything else as a rejection or failure", async () => {
+    const notFound = { error: 'notFound', message: 'there is no pipeline' };
+    expect(
+      await client(() => json(404, notFound)).api.openPipeline({ root: '/x' }),
+    ).toEqual({ kind: 'error', status: 404, error: notFound });
+    expect(await client(rejection).api.listPipelines()).toEqual({
+      kind: 'rejected',
+    });
+    expect(
+      await client(() =>
+        json(200, { roots: [{ path: '/x' }] }),
+      ).api.listPipelines(),
     ).toEqual({ kind: 'failed', status: 200 });
   });
 });

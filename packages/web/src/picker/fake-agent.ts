@@ -11,6 +11,8 @@ export interface HeldRequest {
   path: string;
   /** The `path` query parameter, `null` when there was none. */
   queryPath: string | null;
+  /** The whole query. */
+  query: URLSearchParams;
   /** The JSON body, parsed, when there was one. */
   body: unknown;
   answer(response: Response): void;
@@ -58,6 +60,7 @@ export function fakeAgent(): FakeAgent {
           method: init?.method ?? 'GET',
           path: url.pathname,
           queryPath: url.searchParams.get('path'),
+          query: url.searchParams,
           body: text === undefined ? undefined : (JSON.parse(text) as unknown),
           answer(response) {
             open.delete(request);
@@ -73,7 +76,7 @@ export function fakeAgent(): FakeAgent {
       }),
     WebSocket: class {
       constructor() {
-        throw new Error('the picker opens no channel');
+        throw new Error('the fake agent opens no channel');
       }
     } as unknown as new (url: string) => WebSocket,
   });

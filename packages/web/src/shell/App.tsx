@@ -1,10 +1,11 @@
 // The layout shell: a status bar, then the three regions every later screen
 // fills in -- the graph area (#9), the side panel (#12, #13) and the bottom
-// panel. When it is handed a pipeline the graph area draws it (#9) and the
-// side panel shows which block is selected in it, with the controls to edit
-// the chain (#11), and the form that configures it: for the Kafka source or
-// destination (#12), and for a filter, transform or validate step (#13);
-// nothing opens one yet. Edits are kept here, in memory, as the pipeline the
+// panel. The graph area's entry screen is the pipeline list (#48): opening an
+// entry, or creating a pipeline, draws it (#9), and the side panel shows
+// which block is selected in it, with the controls to edit the chain (#11),
+// and the form that configures it: for the Kafka source or destination (#12),
+// and for a filter, transform or validate step (#13). An entry that did not
+// open says why in place of the graph. Edits are kept here, in memory, as the pipeline the
 // graph draws; saving them is #3. So is what was typed into a form and not
 // yet saved into that pipeline, per block, so selecting another block keeps
 // it.
@@ -13,7 +14,7 @@
 // is no working connection the graph area says why in words, so a dead or
 // refusing agent never looks like an empty screen.
 
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import type { Pipeline } from '@kpv/schema';
 
@@ -35,6 +36,15 @@ import type { StepDraft } from '../panel/step-form.ts';
 import { saveStepDraft, stepFor } from '../panel/step-form.ts';
 import { StepBlockForm } from '../panel/StepBlockForm.tsx';
 import { DirectoryPicker } from '../picker/DirectoryPicker.tsx';
+import {
+  createPipelinesController,
+  type PipelinesController,
+} from '../pipelines/controller.ts';
+import {
+  OpenFailureView,
+  pickerAnchor,
+  PipelinesView,
+} from '../pipelines/PipelinesScreen.tsx';
 
 /**
  * What the configuration forms hold that the pipeline does not, by the node
@@ -71,14 +81,35 @@ export function App(props: {
   return <Shell state={state} client={client} />;
 }
 
-/** The shell for one connection state, so it can be rendered without an agent. */
+/**
+ * The shell for one connection state, so it can be rendered without an agent.
+ * A test hands it a pipeline to draw, or a pipelines controller in the state
+ * it wants to show; the page builds the controller from the client.
+ */
 export function Shell(props: {
   state: ConnectionState;
   client: AgentClient | null;
   pipeline?: Pipeline | null;
+  pipelines?: PipelinesController;
 }) {
   const { state, client } = props;
-  const opened = props.pipeline ?? null;
+  const [ownController] = useState(() =>
+    props.pipelines === undefined ? createPipelinesController(client) : null,
+  );
+  const pipelines = props.pipelines ?? ownController;
+  if (pipelines === null) {
+    throw new Error('the shell has no pipelines controller');
+  }
+  const listed = useSyncExternalStore(
+    pipelines.subscribe,
+    pipelines.current,
+    pipelines.current,
+  );
+  const connectedNow = state.status === 'connected';
+  useEffect(() => {
+    pipelines.setOnline(connectedNow);
+  }, [pipelines, connectedNow]);
+  const opened = props.pipeline ?? listed.opened?.pipeline ?? null;
   // The pipeline as edited, the selected node, why the last edit was refused
   // and the Kafka forms' unsaved input, owned here so the side panel can read
   // them. They belong to the pipeline they were made in, so another pipeline
@@ -213,15 +244,34 @@ export function Shell(props: {
       </header>
       <main className="graph-area" aria-label="Graph area">
         {connected && pipeline !== null ? (
-          <PipelineGraph
-            key={pipeline.id}
-            pipeline={pipeline}
-            selected={selected}
-            onSelect={onSelect}
-            onEdit={onEdit}
-          />
+          <>
+            {listed.opened === null ? null : (
+              <button
+                type="button"
+                className="back-to-pipelines"
+                onClick={() => {
+                  pipelines.close();
+                }}
+              >
+                Back to the pipelines
+              </button>
+            )}
+            <PipelineGraph
+              key={
+                listed.opened === null
+                  ? pipeline.id
+                  : `${listed.opened.location.root}\u0000${listed.opened.location.directory ?? ''}`
+              }
+              pipeline={pipeline}
+              selected={selected}
+              onSelect={onSelect}
+              onEdit={onEdit}
+            />
+          </>
+        ) : connected && listed.openFailure !== null ? (
+          <OpenFailureView state={listed} actions={pipelines} />
         ) : connected ? (
-          <p className="muted">No pipeline open.</p>
+          <PipelinesView state={listed} actions={pipelines} />
         ) : (
           <section
             className="connection-notice"
@@ -277,7 +327,7 @@ export function Shell(props: {
             />
           </>
         )}
-        <h2>Project directory</h2>
+        <h2 id={pickerAnchor}>Project directory</h2>
         <DirectoryPicker client={client} connection={state} />
       </aside>
       <footer className="bottom-panel" aria-label="Bottom panel">

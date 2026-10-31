@@ -31,8 +31,13 @@
 
 import type {
   AuthorizedRoot,
+  CreatePipelineRequest,
   DirectoryError,
   DirectoryListing,
+  PipelineDocument,
+  PipelineList,
+  PipelineLocation,
+  PipelinesError,
   RootList,
   RootsError,
 } from '@kpv/schema';
@@ -40,6 +45,9 @@ import {
   authorizedRootSchema,
   directoryErrorSchema,
   directoryListingSchema,
+  pipelineDocumentSchema,
+  pipelineListSchema,
+  pipelinesErrorSchema,
   rootListSchema,
   rootsErrorSchema,
 } from '@kpv/schema';
@@ -112,11 +120,32 @@ export interface AgentClient {
    * of roots left. Nothing on disk is touched.
    */
   revokeRoot(path: string): Promise<AgentResult<RootList, RootsError>>;
+  /**
+   * Every pipeline under the authorized roots: `GET /api/pipelines` (#48),
+   * read from disk again for every call.
+   */
+  listPipelines(): Promise<AgentResult<PipelineList, PipelinesError>>;
+  /**
+   * One pipeline, by its root and directory as the list gave them:
+   * `GET /api/pipelines/open` (#48). The page never builds a path. The
+   * answer's `pipeline` is a plain object; the caller parses it with the
+   * pipeline schema before drawing it.
+   */
+  openPipeline(
+    location: PipelineLocation,
+  ): Promise<AgentResult<PipelineDocument, PipelinesError>>;
+  /**
+   * Creates a pipeline in a listed root: `POST /api/pipelines` (#48). The
+   * answer is the new pipeline, opened.
+   */
+  createPipeline(
+    request: CreatePipelineRequest,
+  ): Promise<AgentResult<PipelineDocument, PipelinesError>>;
   /** Opens the push channel: `GET /api/channel` (#5), the token in the URL. */
   openChannel(): WebSocket;
 }
 
-/** The methods that send something; the body of each is a RootRequest. */
+/** The methods a request is sent with. */
 type Method = 'GET' | 'POST' | 'DELETE';
 
 /** The environment of the page this runs in. */
@@ -135,13 +164,13 @@ export function createAgentClient(
 ): AgentClient {
   // The one function that sends a request. The token goes in a header rather
   // than the URL, so it is not in any URL a request was made to. A request
-  // with a body is the roots routes' JSON RootRequest (#63), which the agent
-  // takes only as application/json; the browser adds the page's Origin to a
-  // POST or DELETE itself, which those routes require.
+  // with a body is a roots route's RootRequest (#63) or a pipeline create
+  // (#48), which the agent takes only as application/json; the browser adds
+  // the page's Origin to a POST or DELETE itself, which those routes require.
   async function send(
     path: string,
     method: Method = 'GET',
-    body?: { path: string },
+    body?: RequestBody,
   ): Promise<Response | undefined> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
@@ -168,7 +197,7 @@ export function createAgentClient(
     value: Parser<T>,
     error: Parser<E> | undefined,
     method: Method = 'GET',
-    request?: { path: string },
+    request?: RequestBody,
   ): Promise<AgentResult<T, E>> {
     const answer = await send(path, method, request);
     if (answer === undefined) {
@@ -240,6 +269,39 @@ export function createAgentClient(
       });
     },
 
+    listPipelines() {
+      return call('/api/pipelines', pipelineListParser, pipelinesErrorParser);
+    },
+
+    openPipeline(location) {
+      const params = new URLSearchParams({ root: location.root });
+      if (location.directory !== undefined) {
+        params.set('directory', location.directory);
+      }
+      return call(
+        `/api/pipelines/open?${params.toString()}`,
+        pipelineDocumentParser,
+        pipelinesErrorParser,
+      );
+    },
+
+    createPipeline(request) {
+      return call(
+        '/api/pipelines',
+        pipelineDocumentParser,
+        pipelinesErrorParser,
+        'POST',
+        {
+          root: request.root,
+          name: request.name,
+          language: request.language,
+          sourceTopic: request.sourceTopic,
+          destinationTopic: request.destinationTopic,
+          networkMode: request.networkMode,
+        },
+      );
+    },
+
     openChannel() {
       const url = new URL('/api/channel', environment.origin);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -267,6 +329,18 @@ const errorParser: Parser<DirectoryError> = directoryErrorSchema;
 const rootListParser = rootListSchema as unknown as Parser<RootList>;
 const authorizedRootParser: Parser<AuthorizedRoot> = authorizedRootSchema;
 const rootsErrorParser = rootsErrorSchema as unknown as Parser<RootsError>;
+// The pipeline answers likewise, from schema/pipelines.schema.json: an
+// entry's id, name and the like, a location's directory and an error's
+// details are optional.
+const pipelineListParser =
+  pipelineListSchema as unknown as Parser<PipelineList>;
+const pipelineDocumentParser =
+  pipelineDocumentSchema as unknown as Parser<PipelineDocument>;
+const pipelinesErrorParser =
+  pipelinesErrorSchema as unknown as Parser<PipelinesError>;
+
+/** What a request body is: a RootRequest, or a CreatePipelineRequest. */
+type RequestBody = { path: string } | CreatePipelineRequest;
 
 async function readJSON(answer: Response): Promise<unknown> {
   try {
