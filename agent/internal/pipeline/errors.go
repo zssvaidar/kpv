@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -12,9 +11,11 @@ type ErrorKind string
 
 const (
 	// KindForbidden is a path the guard refused. Nothing in this package
-	// produces it yet; the guard that does is #6.
+	// produces it, since it reads no file; internal/catalog reports the
+	// guard's refusals in its own errors (#48).
 	KindForbidden ErrorKind = "forbidden"
 	// KindIO is the file itself: it could not be read, written or replaced.
+	// As with KindForbidden, the file layer is internal/catalog's.
 	KindIO ErrorKind = "io"
 	// KindSyntax is a file that is not well-formed YAML.
 	KindSyntax ErrorKind = "syntax"
@@ -102,21 +103,4 @@ func (e *FileError) Error() string {
 // For a schema failure the cause is the ValidationErrors themselves.
 func (e *FileError) Unwrap() error {
 	return e.Err
-}
-
-// at fills in the file-level context a failure found while decoding bytes could
-// not know, and wraps anything that is not already a FileError.
-func at(op, path string, err error) error {
-	if err == nil {
-		return nil
-	}
-	var fault *FileError
-	if errors.As(err, &fault) {
-		fault.Op = op
-		if fault.Path == "" {
-			fault.Path = path
-		}
-		return fault
-	}
-	return &FileError{Op: op, Path: path, Kind: KindIO, Message: "the pipeline file could not be processed", Err: err}
 }
