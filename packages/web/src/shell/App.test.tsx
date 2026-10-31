@@ -6,6 +6,7 @@ import { createConnectionMonitor } from '../connection/monitor.ts';
 import { fakeAgent, json } from '../picker/fake-agent.ts';
 import { createPipelinesController } from '../pipelines/controller.ts';
 import { fixtureList, pipelinesFixtures } from '../pipelines/fixtures.ts';
+import { pipelinesErrorTitles, unreadableWords } from '../pipelines/words.ts';
 import { App, Shell } from './App.tsx';
 
 // What a person reads, without the markup: React escapes quotes in text.
@@ -118,6 +119,40 @@ describe('the pipeline list as the entry screen', () => {
     expect(html).toContain('aria-label="Pipeline not opened"');
     expect(html).not.toContain('react-flow');
     expect(html).not.toContain('Kafka');
+  });
+});
+
+describe('an entry that can no longer be searched', () => {
+  it('shows the unreadable words in place of the graph, not "No pipeline here"', async () => {
+    const agent = fakeAgent();
+    const controller = createPipelinesController(agent.client);
+    controller.setOnline(true);
+    agent
+      .next('GET', '/api/pipelines')
+      .answer(json(200, fixtureList('every-state')));
+    await agent.settle();
+    controller.open({ root: '/home/user/code/app', directory: 'billing' });
+    // What the agent answers for a directory chmod 644 after it was listed.
+    agent.next('GET', '/api/pipelines/open').answer(
+      json(422, {
+        error: 'unreadable',
+        message: "this pipeline's pipeline.yaml did not load",
+        unreadable: { kind: 'unreadable', problems: [] },
+      }),
+    );
+    await agent.settle();
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipelines={controller}
+      />,
+    );
+    expect(html).toContain('aria-label="Pipeline not opened"');
+    expect(text(html)).toContain(unreadableWords.unreadable);
+    expect(text(html)).toContain(pipelinesErrorTitles.unreadable);
+    expect(text(html)).not.toContain(pipelinesErrorTitles.notFound);
+    expect(html).not.toContain('react-flow');
   });
 });
 

@@ -35,6 +35,13 @@ func TestTheIDIsDerivedFromTheName(t *testing.T) {
 		"Ünïcode Mix 7":                 "n-code-mix-7",
 		long:                            long[:63],
 		strings.Repeat("ab ", 70):       strings.TrimRight(strings.Repeat("ab-", 21), "-"),
+		// Leading and trailing separators are stripped, not turned into "-".
+		"My Orders!":  "my-orders",
+		"   Orders! ": "orders",
+		"!!!":         "pipeline",
+		"-_-":         "pipeline",
+		// The cut at 63 lands just after a separator, which is dropped.
+		strings.Repeat("a", 62) + " b c d": strings.Repeat("a", 62),
 	} {
 		got := deriveID(name)
 		if got != want {
@@ -51,6 +58,17 @@ func TestTheIDIsDerivedFromTheName(t *testing.T) {
 		got := withSuffix(long[:63], n)
 		if len(got) > 63 || !strings.HasSuffix(got, fmt.Sprintf("-%d", n)) || !identifier.MatchString(got) {
 			t.Errorf("suffix %d gave %q", n, got)
+		}
+	}
+	// With a suffix, the base is cut first so the whole stays within 63, and
+	// a cut that lands just after a separator drops it before "-<n>".
+	for base, want := range map[string]string{
+		strings.Repeat("a", 63):              strings.Repeat("a", 61) + "-2",
+		strings.Repeat("a", 60) + "-bc":      strings.Repeat("a", 60) + "-2",
+		strings.Repeat("a", 59) + "-b-cdefg": strings.Repeat("a", 59) + "-b-2",
+	} {
+		if got := withSuffix(base, 2); got != want || len(got) > 63 {
+			t.Errorf("suffix 2 on %q gave %q, want %q", base, got, want)
 		}
 	}
 	if withSuffix("orders", 1) != "orders" || withSuffix("orders", 2) != "orders-2" {

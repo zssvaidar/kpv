@@ -47,8 +47,21 @@ func (c *Catalog) Open(location Location) (*Document, error) {
 		}
 		pin, err := sub.Pin()
 		if err != nil {
-			if projectfs.KindOf(err) == projectfs.KindForbidden {
+			switch projectfs.KindOf(err) {
+			case projectfs.KindForbidden:
 				return nil, c.rootFault(location.Root, projectfs.KindForbidden)
+			case projectfs.KindChanged:
+				// A link, or a directory that cannot be searched, which Pin
+				// cannot tell from a swap. As the list does (scanDirectory),
+				// the name is looked at again: still a directory is
+				// unreadable, anything else is not a pipeline the list shows.
+				if info, lstatErr := sub.Lstat(); lstatErr == nil && info.IsDir() {
+					return nil, c.unreadableUnlessRootGone(location.Root)
+				}
+				return nil, c.notFoundUnlessRootGone(location.Root)
+			}
+			if fault := c.rootStatus(location.Root); fault != nil {
+				return nil, fault
 			}
 			return nil, pinFailure(err)
 		}
@@ -95,4 +108,22 @@ func (c *Catalog) rootFault(root string, kind projectfs.ErrorKind) *Error {
 		return fault
 	}
 	return rootFailure(kind)
+}
+
+// unreadableUnlessRootGone is an unreadable pipeline directory, unless the
+// root itself has gone meanwhile, which is then the answer.
+func (c *Catalog) unreadableUnlessRootGone(root string) *Error {
+	if fault := c.rootStatus(root); fault != nil {
+		return fault
+	}
+	return &Error{Kind: KindUnreadable, Unreadable: unreadable(UnreadableUnreadable)}
+}
+
+// notFoundUnlessRootGone is no pipeline at that directory, unless the root
+// itself has gone meanwhile, which is then the answer.
+func (c *Catalog) notFoundUnlessRootGone(root string) *Error {
+	if fault := c.rootStatus(root); fault != nil {
+		return fault
+	}
+	return &Error{Kind: KindNotFound}
 }

@@ -140,3 +140,69 @@ func TestOpeningASchemaFailureAnswersItsProblemsAndNoPipeline(t *testing.T) {
 		t.Errorf("the problem is %+v", problem)
 	}
 }
+
+// A directory the agent cannot search is unreadable, by open as by the list:
+// Pin cannot tell one from a swap (it answers changed), so open looks at the
+// name again, as the list does. QA's cases: chmod 644 after listing, and a
+// directory that was never searchable.
+func TestADirectoryThatCannotBeSearchedOpensUnreadableAsTheListShowsIt(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root searches every directory")
+	}
+	w := newWorld(t)
+	root := w.root("code")
+	modes := map[string]os.FileMode{"after-listing": 0o644, "never": 0o600, "write-only": 0o200, "nothing": 0o000}
+	for name := range modes {
+		pipelineAt(t, root, name, name)
+	}
+	before := listed(t, w.catalog.List(), root)
+	for name := range modes {
+		if !entry(t, before, name).Readable() {
+			t.Fatalf("%s is not readable before its mode changes", name)
+		}
+	}
+	for name, mode := range modes {
+		if err := os.Chmod(filepath.Join(root, name), mode); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, name), 0o755) })
+	}
+	after := listed(t, w.catalog.List(), root)
+	for name, mode := range modes {
+		if found := entry(t, after, name); found.Unreadable == nil || found.Unreadable.Kind != UnreadableUnreadable {
+			t.Errorf("%s (%v) is listed %+v, want unreadable", name, mode, found.Unreadable)
+		}
+		_, err := w.catalog.Open(Location{Root: root, Directory: name})
+		fault, ok := err.(*Error)
+		if !ok || fault.Kind != KindUnreadable || fault.Unreadable == nil || fault.Unreadable.Kind != UnreadableUnreadable {
+			t.Errorf("%s (%v) opens as %v, want unreadable as the list shows it", name, mode, err)
+		}
+	}
+}
+
+// A directory that is gone, or is now a link, by the time it is opened is
+// notFound, as the list would not show it.
+func TestADirectoryRemovedOrSwappedForALinkBeforeTheOpenIsNotFound(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	root := w.root("code")
+	pipelineAt(t, root, "removed", "removed")
+	pipelineAt(t, root, "linked", "linked")
+	pipelineAt(t, root, "target", "target")
+	w.catalog.List()
+	if err := os.RemoveAll(filepath.Join(root, "removed")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "target"), filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"removed", "linked"} {
+		if _, err := w.catalog.Open(Location{Root: root, Directory: name}); kindOf(t, err) != KindNotFound {
+			t.Errorf("%s opens as %v, want notFound", name, err)
+		}
+	}
+}

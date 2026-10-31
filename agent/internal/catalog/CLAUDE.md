@@ -46,7 +46,10 @@ The list (`list.go`)
 Open and create (`open.go`, `create.go`)
 
 - `Open` answers only what the list would show, re-reads it, and checks the
-  root again after the read. The JSON is converted from the file's bytes, so
+  root again after the read. A directory it cannot search, which `Pin`
+  reports as `changed`, is looked at again as the list does: still a
+  directory is `unreadable`, gone or a link `notFound`, so open and the list
+  agree. The JSON is converted from the file's bytes, so
   no default is filled in; `SHA256` is of the exact bytes, for #78
 - `Create` validates and renders with `pipeline.MarshalYAML` before touching
   anything, claims `<root>/<id>` with one `Mkdir` (`0755`, never an existing

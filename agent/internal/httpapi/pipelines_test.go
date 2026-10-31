@@ -321,6 +321,19 @@ func TestOpenAnswersWhatAnEntryIsNow(t *testing.T) {
 		t.Errorf("a schema failure is %+v", failure.Unreadable)
 	}
 	pipelinesFailureOf(t, tree.open(t, "gone"), PipelinesErrorKindNotFound)
+	// Readable but no longer searchable: unreadable, as the list shows it,
+	// not notFound.
+	if os.Geteuid() != 0 {
+		tree.write(t, "unsearchable", minimalPipeline)
+		if err := os.Chmod(filepath.Join(tree.root, "unsearchable"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(tree.root, "unsearchable"), 0o755) })
+		failure := pipelinesFailureOf(t, tree.open(t, "unsearchable"), PipelinesErrorKindUnreadable)
+		if failure.Unreadable.Kind != UnreadableKindUnreadable {
+			t.Errorf("an unsearchable directory opens as %+v", failure.Unreadable)
+		}
+	}
 	outside := filepath.Join(tree.home, "outside")
 	pipelinesFailureOf(t, tree.server.do(t, tree.server.allowed(openPath(url.Values{"root": {outside}}))), PipelinesErrorKindNotAuthorized)
 	if _, err := tree.roots.Revoke(tree.root); err != nil {
