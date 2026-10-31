@@ -1,10 +1,10 @@
 # @kpv/web
 
 Vite + React in strict TypeScript: the shell, the pipeline list, the graph
-editor, the side panel, the directory picker, and the one client for the
-agent. Tests run in Node through the root `vitest.config.ts`: components are
-rendered to a string and code is handed its window, fetch and timers, so there
-is no DOM. There are two `tsc` projects: `src/` (`tsconfig.json`) and `dev/`
+editor, the side panel, the directory picker, the Kafka connection screen,
+and the one client for the agent. Tests run in Node through the root
+`vitest.config.ts`: components are rendered to a string and code is handed
+its window, fetch and timers, so there is no DOM. There are two `tsc` projects: `src/` (`tsconfig.json`) and `dev/`
 plus `vite.config.ts` (`tsconfig.node.json`).
 
 Rules a change can break
@@ -43,6 +43,17 @@ Rules a change can break
   `schemaIssues` too (`create-form.ts`) and preselects nothing the schema
   gives no default. Words for every kind are in `pipelines/words.ts`; an
   unavailable root uses the picker's `unavailableWords`
+- the Kafka connection screen (`src/connections/`, #24; not `src/connection/`,
+  which is the agent connection's state) is its own screen in the graph area,
+  reached from the status bar, never the side panel. Its form checks with
+  `connectionIssues` and asks `protocolAllowsSasl`/`protocolAllowsTls` from
+  `@kpv/schema` which fields to show (`form.ts`), restating no rule. The
+  password and client key are never prefilled, show only set or not set, use
+  `autocomplete="new-password"`, and are cleared from the form the moment a
+  save is sent (`controller.ts`); a kept one is left out of the update, a
+  removed one listed in `remove`. A referenced delete or rename shows the
+  agent's report and sends `confirm` only when the person asks.
+  `client.ts`'s `listConnectionNames` is what #12's select is filled from
 - `src/connection/monitor.ts` holds the connection state the status bar shows.
   The channel WebSocket is the liveness signal; on a drop one request says why,
   and it reconnects with backoff (`backoff.ts`: 250ms doubling to 10s) unless

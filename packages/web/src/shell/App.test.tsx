@@ -118,7 +118,11 @@ describe('the pipeline list as the entry screen', () => {
     );
     expect(html).toContain('aria-label="Pipeline not opened"');
     expect(html).not.toContain('react-flow');
-    expect(html).not.toContain('Kafka');
+    // No block is drawn; the status bar's way to the connection screen is
+    // the only Kafka on the page.
+    expect(html.replace('Kafka connections</button>', '')).not.toContain(
+      'Kafka',
+    );
   });
 });
 
@@ -166,5 +170,41 @@ describe('App', () => {
     expect(html).toContain('data-state="unauthenticated"');
     expect(text(html)).toContain('Not authorized');
     expect(text(html)).toContain(reopenAdvice);
+  });
+});
+
+describe('the way to the connection screen (#24)', () => {
+  it('is in the status bar, and the screen takes the graph area, not the side panel', () => {
+    const pipelinesHtml = renderToStaticMarkup(
+      <Shell state={{ status: 'connected' }} client={null} />,
+    );
+    expect(pipelinesHtml).toMatch(
+      /<header class="status-bar">.*Kafka connections<\/button><\/header>/s,
+    );
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        screen="connections"
+      />,
+    );
+    const graphArea =
+      /<main class="graph-area"[^>]*>(.*)<\/main>/s.exec(html)?.[1] ?? '';
+    const sidePanel =
+      /<aside class="side-panel"[^>]*>(.*)<\/aside>/s.exec(html)?.[1] ?? '';
+    expect(graphArea).toContain('Kafka connections</h1>');
+    expect(sidePanel).not.toContain('Kafka connections');
+  });
+
+  it('is not shown while there is no working connection to the agent', () => {
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'unreachable', retryInMs: 1000 }}
+        client={null}
+        screen="connections"
+      />,
+    );
+    expect(html).not.toContain('Kafka connections</h1>');
+    expect(html).toContain('data-state="unreachable"');
   });
 });

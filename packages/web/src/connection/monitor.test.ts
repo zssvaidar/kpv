@@ -65,6 +65,11 @@ function setup(probes: AgentResult<null>[]) {
     listPipelines: () => Promise.reject(new Error('not used')),
     openPipeline: () => Promise.reject(new Error('not used')),
     createPipeline: () => Promise.reject(new Error('not used')),
+    listConnections: () => Promise.reject(new Error('not used')),
+    listConnectionNames: () => Promise.reject(new Error('not used')),
+    createConnection: () => Promise.reject(new Error('not used')),
+    updateConnection: () => Promise.reject(new Error('not used')),
+    deleteConnection: () => Promise.reject(new Error('not used')),
     openChannel: () => {
       const socket = new FakeSocket();
       sockets.push(socket);

@@ -31,6 +31,13 @@
 
 import type {
   AuthorizedRoot,
+  Connection,
+  ConnectionDelete,
+  ConnectionList,
+  ConnectionNameList,
+  ConnectionSummary,
+  ConnectionUpdate,
+  ConnectionsError,
   CreatePipelineRequest,
   DirectoryError,
   DirectoryListing,
@@ -43,6 +50,10 @@ import type {
 } from '@kpv/schema';
 import {
   authorizedRootSchema,
+  connectionListSchema,
+  connectionNameListSchema,
+  connectionSummarySchema,
+  connectionsErrorSchema,
   directoryErrorSchema,
   directoryListingSchema,
   pipelineDocumentSchema,
@@ -141,12 +152,50 @@ export interface AgentClient {
   createPipeline(
     request: CreatePipelineRequest,
   ): Promise<AgentResult<PipelineDocument, PipelinesError>>;
+  /**
+   * Every stored Kafka connection without its credentials:
+   * `GET /api/connections` (#24). A summary says only whether each
+   * credential is set.
+   */
+  listConnections(): Promise<AgentResult<ConnectionList, ConnectionsError>>;
+  /**
+   * The name of every stored connection and nothing else:
+   * `GET /api/connections/names` (#24), what #12's select is filled from. A
+   * block naming a connection not in it names one that does not exist.
+   */
+  listConnectionNames(): Promise<
+    AgentResult<ConnectionNameList, ConnectionsError>
+  >;
+  /**
+   * Creates a connection: `POST /api/connections` (#24). The credentials in
+   * the request are sent once and never come back.
+   */
+  createConnection(
+    connection: Connection,
+  ): Promise<AgentResult<ConnectionSummary, ConnectionsError>>;
+  /**
+   * Changes the connection named `current`: `PUT /api/connections` (#24). A
+   * credential left out is kept, one given replaces it, one in `remove` is
+   * removed. A rename some pipeline names answers `referenced` until it is
+   * sent with `confirm`.
+   */
+  updateConnection(
+    update: ConnectionUpdate,
+  ): Promise<AgentResult<ConnectionSummary, ConnectionsError>>;
+  /**
+   * Deletes a connection: `DELETE /api/connections` (#24), answering what is
+   * left. A connection some pipeline names answers `referenced` until it is
+   * sent with `confirm`.
+   */
+  deleteConnection(
+    request: ConnectionDelete,
+  ): Promise<AgentResult<ConnectionList, ConnectionsError>>;
   /** Opens the push channel: `GET /api/channel` (#5), the token in the URL. */
   openChannel(): WebSocket;
 }
 
 /** The methods a request is sent with. */
-type Method = 'GET' | 'POST' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 /** The environment of the page this runs in. */
 export function browserEnvironment(): ClientEnvironment {
@@ -164,9 +213,10 @@ export function createAgentClient(
 ): AgentClient {
   // The one function that sends a request. The token goes in a header rather
   // than the URL, so it is not in any URL a request was made to. A request
-  // with a body is a roots route's RootRequest (#63) or a pipeline create
-  // (#48), which the agent takes only as application/json; the browser adds
-  // the page's Origin to a POST or DELETE itself, which those routes require.
+  // with a body is a roots route's RootRequest (#63), a pipeline create (#48)
+  // or a connection create, update or delete (#24), which the agent takes
+  // only as application/json; the browser adds the page's Origin to a POST,
+  // PUT or DELETE itself, which those routes require.
   async function send(
     path: string,
     method: Method = 'GET',
@@ -302,6 +352,52 @@ export function createAgentClient(
       );
     },
 
+    listConnections() {
+      return call(
+        '/api/connections',
+        connectionListParser,
+        connectionsErrorParser,
+      );
+    },
+
+    listConnectionNames() {
+      return call(
+        '/api/connections/names',
+        connectionNameListParser,
+        connectionsErrorParser,
+      );
+    },
+
+    createConnection(connection) {
+      return call(
+        '/api/connections',
+        connectionSummaryParser,
+        connectionsErrorParser,
+        'POST',
+        connection,
+      );
+    },
+
+    updateConnection(update) {
+      return call(
+        '/api/connections',
+        connectionSummaryParser,
+        connectionsErrorParser,
+        'PUT',
+        update,
+      );
+    },
+
+    deleteConnection(request) {
+      return call(
+        '/api/connections',
+        connectionListParser,
+        connectionsErrorParser,
+        'DELETE',
+        request,
+      );
+    },
+
     openChannel() {
       const url = new URL('/api/channel', environment.origin);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -339,8 +435,28 @@ const pipelineDocumentParser =
 const pipelinesErrorParser =
   pipelinesErrorSchema as unknown as Parser<PipelinesError>;
 
-/** What a request body is: a RootRequest, or a CreatePipelineRequest. */
-type RequestBody = { path: string } | CreatePipelineRequest;
+// The connection answers likewise, from schema/connection.schema.json: a
+// summary's mechanism, username and certificates and an error's details are
+// optional.
+const connectionListParser =
+  connectionListSchema as unknown as Parser<ConnectionList>;
+const connectionNameListParser: Parser<ConnectionNameList> =
+  connectionNameListSchema;
+const connectionSummaryParser =
+  connectionSummarySchema as unknown as Parser<ConnectionSummary>;
+const connectionsErrorParser =
+  connectionsErrorSchema as unknown as Parser<ConnectionsError>;
+
+/**
+ * What a request body is: a RootRequest, a CreatePipelineRequest, or a
+ * connection create, update or delete.
+ */
+type RequestBody =
+  | { path: string }
+  | CreatePipelineRequest
+  | Connection
+  | ConnectionUpdate
+  | ConnectionDelete;
 
 async function readJSON(answer: Response): Promise<unknown> {
   try {

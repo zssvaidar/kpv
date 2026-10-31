@@ -10,6 +10,10 @@
 // yet saved into that pipeline, per block, so selecting another block keeps
 // it.
 //
+// The status bar also leads to the Kafka connection screen (#24), which takes
+// the graph area's place until it is closed: connections are their own
+// screen, never part of the block side panel.
+//
 // The connection state is in the status bar on every screen, and when there
 // is no working connection the graph area says why in words, so a dead or
 // refusing agent never looks like an empty screen.
@@ -19,6 +23,11 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { Pipeline } from '@kpv/schema';
 
 import type { AgentClient } from '../api/client.ts';
+import { ConnectionsView } from '../connections/ConnectionsScreen.tsx';
+import {
+  createConnectionsController,
+  type ConnectionsController,
+} from '../connections/controller.ts';
 import { describeConnection } from '../connection/describe.ts';
 import type {
   ConnectionMonitor,
@@ -91,8 +100,26 @@ export function Shell(props: {
   client: AgentClient | null;
   pipeline?: Pipeline | null;
   pipelines?: PipelinesController;
+  connections?: ConnectionsController;
+  /** Which screen the graph area starts on; the pipelines by default. */
+  screen?: 'pipelines' | 'connections';
 }) {
   const { state, client } = props;
+  const [screen, setScreen] = useState(props.screen ?? 'pipelines');
+  const [ownConnections] = useState(() =>
+    props.connections === undefined
+      ? createConnectionsController(client)
+      : null,
+  );
+  const connectionsController = props.connections ?? ownConnections;
+  if (connectionsController === null) {
+    throw new Error('the shell has no connections controller');
+  }
+  const connectionsState = useSyncExternalStore(
+    connectionsController.subscribe,
+    connectionsController.current,
+    connectionsController.current,
+  );
   const [ownController] = useState(() =>
     props.pipelines === undefined ? createPipelinesController(client) : null,
   );
@@ -109,6 +136,9 @@ export function Shell(props: {
   useEffect(() => {
     pipelines.setOnline(connectedNow);
   }, [pipelines, connectedNow]);
+  useEffect(() => {
+    connectionsController.setOnline(connectedNow);
+  }, [connectionsController, connectedNow]);
   const opened = props.pipeline ?? listed.opened?.pipeline ?? null;
   // The pipeline as edited, the selected node, why the last edit was refused
   // and the Kafka forms' unsaved input, owned here so the side panel can read
@@ -241,9 +271,28 @@ export function Shell(props: {
         >
           {description.label}
         </span>
+        <button
+          type="button"
+          className="to-connections"
+          aria-pressed={screen === 'connections'}
+          onClick={() => {
+            setScreen(screen === 'connections' ? 'pipelines' : 'connections');
+            if (screen !== 'connections') connectionsController.refresh();
+          }}
+        >
+          Kafka connections
+        </button>
       </header>
       <main className="graph-area" aria-label="Graph area">
-        {connected && pipeline !== null ? (
+        {connected && screen === 'connections' ? (
+          <ConnectionsView
+            state={connectionsState}
+            actions={connectionsController}
+            onClose={() => {
+              setScreen('pipelines');
+            }}
+          />
+        ) : connected && pipeline !== null ? (
           <>
             {listed.opened === null ? null : (
               <button

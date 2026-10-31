@@ -1,3 +1,4 @@
+import type { Connection } from '@kpv/schema';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -91,6 +92,28 @@ const everyRequest: [string, (api: AgentClient) => Promise<unknown>][] = [
         networkMode: 'docker',
       }),
   ],
+  ['listConnections', (api) => api.listConnections()],
+  ['listConnectionNames', (api) => api.listConnectionNames()],
+  [
+    'createConnection',
+    (api) =>
+      api.createConnection({
+        name: 'local',
+        bootstrapServers: ['localhost:9092'],
+        securityProtocol: 'PLAINTEXT',
+      }),
+  ],
+  [
+    'updateConnection',
+    (api) =>
+      api.updateConnection({
+        current: 'local',
+        name: 'local',
+        bootstrapServers: ['localhost:9092'],
+        securityProtocol: 'PLAINTEXT',
+      }),
+  ],
+  ['deleteConnection', (api) => api.deleteConnection({ name: 'local' })],
 ];
 
 describe('createAgentClient', () => {
@@ -115,7 +138,11 @@ describe('createAgentClient', () => {
     const { api } = client(() => json(200, listing));
     expect(Object.keys(api).sort()).toEqual([
       'authorizeRoot',
+      'createConnection',
       'createPipeline',
+      'deleteConnection',
+      'listConnectionNames',
+      'listConnections',
       'listDirectories',
       'listPipelines',
       'listRoots',
@@ -123,6 +150,7 @@ describe('createAgentClient', () => {
       'openPipeline',
       'probe',
       'revokeRoot',
+      'updateConnection',
     ]);
   });
 
@@ -394,5 +422,107 @@ describe('the pipeline methods', () => {
         json(200, { roots: [{ path: '/x' }] }),
       ).api.listPipelines(),
     ).toEqual({ kind: 'failed', status: 200 });
+  });
+});
+
+describe('the connection methods', () => {
+  const summary = {
+    name: 'local',
+    bootstrapServers: ['localhost:9092'],
+    securityProtocol: 'SASL_PLAINTEXT',
+    saslMechanism: 'PLAIN',
+    saslUsername: 'u',
+    saslPasswordSet: true,
+    tlsClientKeySet: false,
+  };
+
+  it('lists with GET /api/connections and the names with GET /api/connections/names', async () => {
+    const { api, sent } = client((url) =>
+      url.endsWith('/names')
+        ? json(200, { names: [] })
+        : json(200, { connections: [summary] }),
+    );
+    expect(await api.listConnections()).toEqual({
+      kind: 'ok',
+      value: { connections: [summary] },
+    });
+    expect(await api.listConnectionNames()).toEqual({
+      kind: 'ok',
+      value: { names: [] },
+    });
+    expect(new URL(sent[0]?.url ?? '').pathname).toBe('/api/connections');
+    expect(new URL(sent[1]?.url ?? '').pathname).toBe('/api/connections/names');
+  });
+
+  it('refuses an answer that carries a credential', async () => {
+    const leaking = { connections: [{ ...summary, saslPassword: 'p' }] };
+    expect(
+      await client(() => json(200, leaking)).api.listConnections(),
+    ).toEqual({ kind: 'failed', status: 200 });
+  });
+
+  it('creates, updates and deletes with POST, PUT and DELETE and a JSON body', async () => {
+    const { api, sent } = client(() => json(200, summary));
+    const record: Connection = {
+      name: 'local',
+      bootstrapServers: ['localhost:9092'],
+      securityProtocol: 'SASL_PLAINTEXT',
+      saslMechanism: 'PLAIN',
+      saslUsername: 'u',
+      saslPassword: 'typed',
+    };
+    expect(await api.createConnection(record)).toEqual({
+      kind: 'ok',
+      value: summary,
+    });
+    await api.updateConnection({
+      current: 'local',
+      name: record.name,
+      bootstrapServers: record.bootstrapServers,
+      securityProtocol: record.securityProtocol,
+      remove: ['saslPassword'],
+    });
+    expect(sent[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(sent[0]?.init?.body as string)).toEqual(record);
+    expect(sent[1]?.init?.method).toBe('PUT');
+    expect(JSON.parse(sent[1]?.init?.body as string)).not.toHaveProperty(
+      'saslPassword',
+    );
+    const deleted = client(() => json(200, { connections: [] }));
+    expect(
+      await deleted.api.deleteConnection({ name: 'local', confirm: true }),
+    ).toEqual({ kind: 'ok', value: { connections: [] } });
+    expect(deleted.sent[0]?.init?.method).toBe('DELETE');
+    expect(JSON.parse(deleted.sent[0]?.init?.body as string)).toEqual({
+      name: 'local',
+      confirm: true,
+    });
+  });
+
+  it("reads a referenced refusal as the endpoint's own error, with its report", async () => {
+    const referenced = {
+      error: 'referenced',
+      message: 'm',
+      references: [
+        {
+          root: '/home/u/code',
+          directory: 'orders',
+          pipelineId: 'orders',
+          block: 'source',
+        },
+      ],
+      unchecked: [],
+    };
+    expect(
+      await client(() => json(409, referenced)).api.deleteConnection({
+        name: 'local',
+      }),
+    ).toEqual({ kind: 'error', status: 409, error: referenced });
+    const notFound = { error: 'notFound', message: 'm' };
+    expect(
+      await client(() => json(404, notFound)).api.deleteConnection({
+        name: 'x',
+      }),
+    ).toEqual({ kind: 'error', status: 404, error: notFound });
   });
 });

@@ -234,3 +234,43 @@ describe('the form modules', () => {
     );
   });
 });
+
+// #24: a Kafka block may name a connection, and the form keeps that name
+// when another field is saved, until #12 gives it a select of its own.
+describe('a block that names a connection', () => {
+  it('keeps the connection when another field is saved', () => {
+    const pipeline = everyType();
+    pipeline.source = { ...pipeline.source, connection: 'eu-cluster' };
+    pipeline.destination = { ...pipeline.destination, connection: 'billing' };
+    const source = saveDraft(
+      pipeline,
+      sourceDraft(pipeline, { topic: 'orders.v2' }),
+    );
+    expect(source.ok).toBe(true);
+    if (!source.ok) return;
+    expect(source.pipeline.source).toMatchObject({
+      topic: 'orders.v2',
+      connection: 'eu-cluster',
+    });
+    const destination = saveDraft(
+      source.pipeline,
+      destinationDraft(source.pipeline, { acks: '1' }),
+    );
+    expect(destination.ok).toBe(true);
+    if (!destination.ok) return;
+    expect(destination.pipeline.destination).toMatchObject({
+      acks: '1',
+      connection: 'billing',
+    });
+    expect(destination.pipeline.source.connection).toBe('eu-cluster');
+  });
+
+  it('saves a block with no connection without adding one', () => {
+    const pipeline = everyType();
+    const saved = saveDraft(
+      pipeline,
+      sourceDraft(pipeline, { topic: 'orders.v2' }),
+    );
+    expect(saved.ok && 'connection' in saved.pipeline.source).toBe(false);
+  });
+});
