@@ -5,3 +5,9 @@ pnpm-lock.yaml
 # Prose owned by the team process, not formatted as code
 _docs/
 @CLAUDE.md
+
+# Local tool state, never repo content: Claude Code's settings and agent
+# worktrees (full copies of the repo), Serena's and RTK's project state (#72)
+.claude/
+.serena/
+.rtk/

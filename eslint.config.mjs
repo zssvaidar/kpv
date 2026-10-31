@@ -39,6 +39,12 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       'packages/schema/src/generated/**',
+      // Local tool state, never repo content: Claude Code's settings and agent
+      // worktrees (full copies of the repo), Serena's and RTK's project state.
+      // Flat config does not read .gitignore, so they are named here (#72).
+      '.claude/**',
+      '.serena/**',
+      '.rtk/**',
     ],
   },
   js.configs.recommended,
