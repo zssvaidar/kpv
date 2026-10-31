@@ -40,7 +40,13 @@ The list (`list.go`)
   `notRegularFile`, over 1 MiB `tooLarge`, and none of them is read
   (`file.go`, `readIn`, which says what window is left)
 - a file that fails to parse or fails the schema is `parse` or `schema` with
-  every problem (pointer, line, column, message) and no id, name or language
+  every problem (pointer, line, column, message) and no id, name or language.
+  Problems are in one total order, by line, column, pointer, then message (a
+  problem with no known line first), because the validator's own order for a
+  `oneOf` failure varies between validations and two lists of an unchanged
+  disk, and every open, have to be identical (`sortProblems` in `file.go`,
+  `TestASchemaFailureListsAndOpensWithTheSameProblemsInTheSameOrderEveryTime`).
+  This applies to list, open, and a create's `invalid` problems
 - nothing is cached or watched, and the list never changes the disk
 
 Open and create (`open.go`, `create.go`)

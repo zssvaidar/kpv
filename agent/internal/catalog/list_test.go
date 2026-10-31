@@ -411,3 +411,43 @@ func TestListLogLinesCarryCountsAndNoPath(t *testing.T) {
 		t.Errorf("a log line carries a path: %s", logs)
 	}
 }
+
+// The validator reports a oneOf failure's violations in an order that varies
+// from one validation to the next, so the problems are put in one total
+// order (line, column, pointer, message): many lists and opens of an
+// unchanged schema failure are identical.
+func TestASchemaFailureListsAndOpensWithTheSameProblemsInTheSameOrderEveryTime(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	root := w.root("code")
+	pipelineAt(t, root, "fine", "fine")
+	write(t, filepath.Join(root, "hand-edited", FileName), strings.Replace(valid("schema"), "destination:",
+		"processingSteps:\n  - id: check\n    type: validate\n    configuration:\n      rules:\n        - field: amount\n  - id: other\n    type: filter\n    configuration:\n      keep: true\ndestination:", 1))
+
+	first := w.catalog.List()
+	problems := entry(t, listed(t, first, root), "hand-edited").Unreadable.Problems
+	if len(problems) < 5 {
+		t.Fatalf("the failure has only %d problems, too few to show an order", len(problems))
+	}
+	for index := 1; index < len(problems); index++ {
+		a, b := problems[index-1], problems[index]
+		if a.Line > b.Line || (a.Line == b.Line && (a.Column > b.Column ||
+			(a.Column == b.Column && (a.Pointer > b.Pointer || (a.Pointer == b.Pointer && a.Message > b.Message))))) {
+			t.Errorf("problems %d and %d are out of order: %+v then %+v", index-1, index, a, b)
+		}
+	}
+	_, err := w.catalog.Open(Location{Root: root, Directory: "hand-edited"})
+	opened, ok := err.(*Error)
+	if !ok || opened.Unreadable == nil || !reflect.DeepEqual(opened.Unreadable.Problems, problems) {
+		t.Fatalf("open answered %v, want the list's problems", err)
+	}
+	for range 50 {
+		if again := w.catalog.List(); !reflect.DeepEqual(again, first) {
+			t.Fatalf("a list of the unchanged disk differs:\n%+v\n%+v", first, again)
+		}
+		_, err := w.catalog.Open(Location{Root: root, Directory: "hand-edited"})
+		if fault, ok := err.(*Error); !ok || !reflect.DeepEqual(fault.Unreadable.Problems, problems) {
+			t.Fatalf("an open of the unchanged file answered other problems: %v", err)
+		}
+	}
+}

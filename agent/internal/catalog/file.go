@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"sort"
 	"time"
 
 	"github.com/zssvaidar/kpv/agent/internal/pipeline"
@@ -159,7 +160,28 @@ func schemaProblems(data []byte, violations pipeline.ValidationErrors) []Problem
 		}
 		out = append(out, problem)
 	}
+	sortProblems(out)
 	return out
+}
+
+// sortProblems puts problems in one total order: by line, then column, then
+// pointer, then message, so a problem with no known position (line 0) comes
+// first. The validator reports a document's violations in an order that
+// depends on how it walked a oneOf, which differs from one validation to the
+// next, and two lists of an unchanged disk have to be identical.
+func sortProblems(problems []Problem) {
+	sort.SliceStable(problems, func(i, j int) bool {
+		a, b := problems[i], problems[j]
+		switch {
+		case a.Line != b.Line:
+			return a.Line < b.Line
+		case a.Column != b.Column:
+			return a.Column < b.Column
+		case a.Pointer != b.Pointer:
+			return a.Pointer < b.Pointer
+		}
+		return a.Message < b.Message
+	})
 }
 
 // digest is the lowercase hex SHA-256 of data.
