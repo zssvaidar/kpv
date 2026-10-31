@@ -118,6 +118,45 @@ func TestALinkInThePipelinePathIsRefusedChanged(t *testing.T) {
 	}
 }
 
+// A relative pipeline directory is resolved against the working directory,
+// which for a test is the package directory and outside the scratch root, so
+// the guard refuses it as forbidden before the real-path check is reached,
+// for all three calls, and nothing is written.
+func TestARelativePipelineDirectoryIsForbidden(t *testing.T) {
+	t.Parallel()
+	calls := map[string]func(p *project, dir string) error{
+		"write": func(p *project, dir string) error {
+			_, err := p.files.WriteEnv(context.Background(), dir, secretsOf(map[string]string{"K": canary}), nil)
+			return err
+		},
+		"gitignore": func(p *project, dir string) error {
+			_, err := p.files.WriteGitignore(context.Background(), dir)
+			return err
+		},
+		"read": func(p *project, dir string) error { _, err := p.files.ReadEnv(dir); return err },
+	}
+	for call, run := range calls {
+		t.Run(call, func(t *testing.T) {
+			t.Parallel()
+			p := newProject(t)
+			before := snapshot(t, filepath.Dir(p.root))
+			err := run(p, "pipe")
+			var refusal *Error
+			if !errors.As(err, &refusal) || refusal.Problems[0].Kind != KindRefused ||
+				refusal.Problems[0].Guard != projectfs.KindForbidden || !projectfs.IsForbidden(err) {
+				t.Fatalf("a relative pipeline directory gave %v, want KindRefused with Guard forbidden", err)
+			}
+			if strings.Contains(err.Error(), canary) {
+				t.Errorf("the refusal holds the value: %v", err)
+			}
+			sameSnapshot(t, before, snapshot(t, filepath.Dir(p.root)))
+			if _, statErr := os.Lstat(filepath.Join("pipe")); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("something exists at pipe in the package directory: %v", statErr)
+			}
+		})
+	}
+}
+
 // The pipeline directory, or a directory above it, is renamed away and a link
 // to an in-root sibling put at its name during a write: both files land in
 // the original directory, under its new name, and the sibling is untouched.

@@ -382,8 +382,14 @@ func usablePath(candidate string) error {
 // classifyResolution turns a failure of the real-path walk into a kind and a
 // message. It never produces KindForbidden: whether a path is allowed is
 // decided by the containment check, not by what the filesystem said.
+//
+// A symbolic link that was replaced or removed between the walk's Lstat and
+// its Readlink is KindChanged, checked before KindNotFound because the
+// Readlink error it wraps can itself say the name does not exist.
 func classifyResolution(err error) (ErrorKind, string) {
 	switch {
+	case errors.Is(err, errLinkChanged):
+		return KindChanged, "a symbolic link on the way to this path changed while it was being resolved"
 	case errors.Is(err, fs.ErrPermission):
 		return KindUnreadable, "a directory on the way to this path cannot be read by this process"
 	case errors.Is(err, errNotDirectory):
@@ -414,6 +420,13 @@ func (g *Guard) Resolve(path string) (Path, error) {
 }
 
 func (g *Guard) resolve(op, given string) (Path, error) {
+	return g.resolveWith(op, given, nil)
+}
+
+// resolveWith is resolve with walk's between hook, called after a link's
+// Lstat and before its Readlink, which is how a test changes the link in that
+// moment. resolve passes none.
+func (g *Guard) resolveWith(op, given string, between func(link string)) (Path, error) {
 	if err := usablePath(given); err != nil {
 		var fault *PathError
 		if errors.As(err, &fault) {
@@ -432,7 +445,7 @@ func (g *Guard) resolve(op, given string) (Path, error) {
 	resolved, missing, resolveErr := walk(absolutePath, func(candidate string) bool {
 		owner, _ := g.locate(candidate)
 		return owner != nil
-	})
+	}, between)
 	if errors.Is(resolveErr, errClimbsOut) {
 		return Path{}, g.climbedOut(op, given)
 	}

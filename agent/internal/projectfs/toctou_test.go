@@ -358,3 +358,72 @@ func TestRacingTheSwapNeverReadsOutsideTheRoot(t *testing.T) {
 	}
 	t.Logf("raced %d swaps: %d reads inside, %d refused, %d other", swaps, inside.Load(), refusals.Load(), other.Load())
 }
+
+// A name the walk saw as a symbolic link can stop being one before its target
+// is read. That is the same race Pin refuses when a component's Lstat and its
+// open disagree, and Resolve reports it the same way: KindChanged, never an
+// I/O failure. The hook runs in exactly that moment, so each case is
+// deterministic rather than a race that has to be won.
+func TestALinkThatChangesBeforeItIsReadIsRefusedAsChanged(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		change func(t *testing.T, link string)
+		want   ErrorKind
+	}{
+		{"replaced by a directory", func(t *testing.T, link string) {
+			if err := os.Remove(link); err != nil {
+				t.Fatalf("remove %s: %v", link, err)
+			}
+			if err := os.Mkdir(link, 0o755); err != nil {
+				t.Fatalf("make %s a directory: %v", link, err)
+			}
+		}, KindChanged},
+		{"removed", func(t *testing.T, link string) {
+			if err := os.Remove(link); err != nil {
+				t.Fatalf("remove %s: %v", link, err)
+			}
+		}, KindChanged},
+		{"left alone", func(*testing.T, string) {}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			f.symlink("inside", filepath.Join("project", "dir"))
+			linkPath := f.in("dir")
+			through := f.in("dir", "ok.txt")
+
+			calls := 0
+			resolved, err := f.guard.resolveWith("resolve", through, func(link string) {
+				calls++
+				if link != linkPath {
+					t.Errorf("the hook was called for %s, want the link %s", link, linkPath)
+					return
+				}
+				tc.change(t, link)
+			})
+			if calls != 1 {
+				t.Errorf("the hook was called %d times, want once", calls)
+			}
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("%s was refused (%v) with the link unchanged", through, err)
+				}
+				if want := f.in("inside", "ok.txt"); resolved.Real() != want {
+					t.Errorf("%s resolved to %s, want %s", through, resolved.Real(), want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("%s resolved to %s after the link changed, and it must be refused", through, resolved.Real())
+			}
+			if got := KindOf(err); got != tc.want {
+				t.Errorf("refused as %q (%v), want %q", got, err, tc.want)
+			}
+			if IsNotFound(err) {
+				t.Errorf("a link that changed was reported as not found: %v", err)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package projectfs
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,6 +25,12 @@ var (
 	// directory outside every authorized root. The walk stops there, before it
 	// looks anything else up.
 	errClimbsOut = errors.New(`a ".." climbs out of the authorized roots`)
+	// errLinkChanged is a name the walk saw as a symbolic link that was no
+	// longer one, or no longer there, by the time its target was read. It
+	// wraps the Readlink error. It is the same race Pin refuses as changed
+	// when a component's Lstat and its open disagree, and it is reported the
+	// same way rather than as an I/O failure.
+	errLinkChanged = errors.New("a symbolic link on this path changed while it was being read")
 )
 
 // segment is one component of the path being walked, and whether it came from
@@ -107,7 +114,7 @@ func splitSegments(path string) []string {
 // caller can still ask whether that much is inside an authorized root before
 // it decides what the failure was.
 func realPath(raw string) (reached string, missing []string, err error) {
-	return walk(raw, nil)
+	return walk(raw, nil, nil)
 }
 
 // walk is realPath with the climb rule applied: inside reports whether a real
@@ -120,7 +127,18 @@ func realPath(raw string) (reached string, missing []string, err error) {
 // still to come is refused the same way, and so is one whose missing tail
 // climbs out: the answer to a path that climbs out never depends on what does
 // or does not exist outside the roots.
-func walk(raw string, inside func(string) bool) (reached string, missing []string, err error) {
+//
+// A name that Lstat reports as a symbolic link can be replaced or removed
+// before its target is read. When Readlink then fails, the name is looked at
+// again: if it is no longer a link, or is gone, the walk fails with
+// errLinkChanged wrapping the Readlink error, which the guard reports as
+// KindChanged. Any other Readlink failure is returned as it is. This is
+// decided by the second Lstat and not by matching an errno.
+//
+// between, when not nil, is called with a link's path after its Lstat and
+// before its Readlink, which is how a test changes the link in that moment.
+// Every caller outside tests passes nil.
+func walk(raw string, inside func(string) bool, between func(link string)) (reached string, missing []string, err error) {
 	parts := givenSegments(raw)
 	current := string(filepath.Separator)
 	currentIsDirectory := true
@@ -182,8 +200,15 @@ func walk(raw string, inside func(string) bool) (reached string, missing []strin
 		if hops > maxSymlinkHops {
 			return fail(index, errTooManyLinks)
 		}
+		if between != nil {
+			between(next)
+		}
 		target, linkErr := os.Readlink(next)
 		if linkErr != nil {
+			if again, againErr := os.Lstat(next); errors.Is(againErr, fs.ErrNotExist) ||
+				(againErr == nil && again.Mode()&fs.ModeSymlink == 0) {
+				linkErr = fmt.Errorf("%w: %w", errLinkChanged, linkErr)
+			}
 			return fail(index, linkErr)
 		}
 		// Splice the link's target in front of whatever is left of the path,

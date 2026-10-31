@@ -22,12 +22,15 @@
 // WriteEnv and WriteGitignore pins it once (projectfs.Path.Pin) before
 // anything is read and closes the pin before it returns. A link anywhere on
 // the directory's path, there when the call is made or swapped in before the
-// pin, is refused as the guard's changed. Once pinned, every Lstat, read,
-// listing, removal and atomic write reaches .env, .gitignore and the
-// temporary files by their single names through the pin, so both files land
-// in the directory that was checked: one renamed during a call, or replaced
-// at its name by a link, keeps getting that call's writes under its new name,
-// and a .env is never written where the .gitignore just written is not.
+// pin, is refused as the guard's changed. A relative directory is resolved
+// against the working directory, so outside every root it is the guard's
+// forbidden, and it is changed only when it resolves inside a root. Once
+// pinned, every Lstat, read, listing, removal and atomic write reaches .env,
+// .gitignore and the temporary files by their single names through the pin,
+// so both files land in the directory that was checked: one renamed during a
+// call, or replaced at its name by a link, keeps getting that call's writes
+// under its new name, and a .env is never written where the .gitignore just
+// written is not.
 //
 // A .env or .gitignore that is a symbolic link is reported and never read,
 // written through or replaced. What remains is a link swapped in at one of

@@ -21,6 +21,9 @@ caller is deploy, #68; #24 uses `Secret` for stored credentials, #74 writes the
   its single name through `PinnedDir.Path()`, and closes the pin on return. The
   directory must be given as its real path: a link anywhere on it, given or
   swapped in before the pin, is `KindRefused` with `Guard: changed`. A
+  relative directory is resolved against the working directory, so outside
+  every root it is `Guard: forbidden` (`TestARelativePipelineDirectoryIsForbidden`),
+  and `changed` only when it resolves inside a root. A
   directory renamed during a call, or replaced at its name by a link, keeps
   getting that call's writes under its new name (`pin_test.go`, including a
   `-race` loop against a goroutine swapping it)

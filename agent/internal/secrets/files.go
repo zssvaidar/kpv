@@ -358,8 +358,11 @@ func checkChange(set map[string]Secret, remove []string) ([]string, map[string]b
 
 // resolve checks the pipeline directory with the guard. dir must be the
 // directory's real path: one the guard resolves to anywhere else has a
-// symbolic link on its way (or is relative), and a link there is how the
-// directory would be swapped for another, so it is refused as changed.
+// symbolic link on its way, and a link there is how the directory would be
+// swapped for another, so it is refused as changed. A relative dir is
+// resolved by the guard against the working directory: outside every root
+// the guard has already refused it as forbidden, and only one that resolves
+// inside a root reaches this check and is refused as changed.
 func (f *Files) resolve(dir string) (projectfs.Path, *Problem, error) {
 	directory, err := f.guard.Resolve(dir)
 	if err != nil {
@@ -396,7 +399,7 @@ func (f *Files) resolve(dir string) (projectfs.Path, *Problem, error) {
 	return directory, nil, nil
 }
 
-const notRealPath = "the pipeline directory was not given as its real path: a component of it is a symbolic link, or it is relative"
+const notRealPath = "the pipeline directory was not given as its real path: a component of it is a symbolic link, or it is a relative path"
 
 // pin holds the resolved pipeline directory open for the rest of the call. A
 // component that is now a link is the guard's changed.
