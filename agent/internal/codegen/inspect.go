@@ -64,6 +64,7 @@ func Inspect(ctx context.Context, dir projectfs.Path) (Inspection, error) {
 	if problem != nil {
 		return Inspection{}, problem
 	}
+	defer t.close()
 	listed, problem := t.readManifest()
 	if problem != nil {
 		return Inspection{}, problem

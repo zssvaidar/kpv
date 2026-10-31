@@ -147,28 +147,58 @@ func TestAManifestListedPathThatIsNoLongerARegularFileIsReportedAndLeftInPlace(t
 	}
 }
 
-func TestAPipelineDirectoryThatNowResolvesOutsideTheRootIsTheGuardsForbidden(t *testing.T) {
+// The pipeline directory was link-free when it was resolved; a component of
+// its path that is a link when the run starts is the guard's changed, whether
+// the link stays inside the root or leads out of it, and nothing is written.
+func TestAPipelineDirectoryWithALinkOnItsPathIsTheGuardsChanged(t *testing.T) {
 	t.Parallel()
-	p := newProject(t)
-	runOK(t, p, model("orders"), fake)
-	outside := t.TempDir()
-	write(t, filepath.Join(outside, GeneratedDir, "pipeline.txt"), "outside")
-	if err := os.Rename(p.pipe, p.pipe+".moved"); err != nil {
-		t.Fatal(err)
-	}
-	symlink(t, outside, p.pipe)
-	beforeOutside := snapshot(t, outside)
+	t.Run("the pipeline directory itself, out of the root", func(t *testing.T) {
+		t.Parallel()
+		p := newProject(t)
+		runOK(t, p, model("orders"), fake)
+		outside := t.TempDir()
+		write(t, filepath.Join(outside, GeneratedDir, "pipeline.txt"), "outside")
+		if err := os.Rename(p.pipe, p.pipe+".moved"); err != nil {
+			t.Fatal(err)
+		}
+		symlink(t, outside, p.pipe)
+		before := p.whole(t)
+		beforeOutside := snapshot(t, outside)
 
-	report, err := Run(context.Background(), p.dir, model("payments"), fake)
+		report, err := Run(context.Background(), p.dir, model("payments"), fake)
 
-	problem := problemOf(t, report, err)
-	if problem.Kind != ProblemGuard || problem.GuardKind != projectfs.KindForbidden || !projectfs.IsForbidden(err) {
-		t.Fatalf("problem %+v, err %v", problem, err)
-	}
-	sameSnapshot(t, "the directory outside the root", beforeOutside, snapshot(t, outside))
-	if _, err := Inspect(context.Background(), p.dir); !projectfs.IsForbidden(err) {
-		t.Fatalf("inspect: %v", err)
-	}
+		problem := problemOf(t, report, err)
+		if problem.Kind != ProblemGuard || problem.GuardKind != projectfs.KindChanged || projectfs.KindOf(err) != projectfs.KindChanged {
+			t.Fatalf("problem %+v, err %v", problem, err)
+		}
+		sameSnapshot(t, "the whole tree", before, p.whole(t))
+		sameSnapshot(t, "the directory outside the root", beforeOutside, snapshot(t, outside))
+		if _, err := Inspect(context.Background(), p.dir); projectfs.KindOf(err) != projectfs.KindChanged {
+			t.Fatalf("inspect: %v", err)
+		}
+	})
+	t.Run("a directory above it, inside the root", func(t *testing.T) {
+		t.Parallel()
+		p := newProject(t)
+		nested := filepath.Join(p.root, "team", "pipe")
+		write(t, filepath.Join(nested, SourceDir, "handler.go"), "package src\n")
+		dir, err := p.guard.Resolve(nested)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(filepath.Join(p.root, "team"), filepath.Join(p.root, "team.moved")); err != nil {
+			t.Fatal(err)
+		}
+		symlink(t, "team.moved", filepath.Join(p.root, "team"))
+		before := p.whole(t)
+
+		report, err := Run(context.Background(), dir, model("orders"), fake)
+
+		if problem := problemOf(t, report, err); problem.Kind != ProblemGuard || problem.GuardKind != projectfs.KindChanged {
+			t.Fatalf("problem %+v", problem)
+		}
+		sameSnapshot(t, "the whole tree", before, p.whole(t))
+	})
 }
 
 func TestARevokedRootIsTheGuardsForbidden(t *testing.T) {

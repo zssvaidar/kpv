@@ -34,8 +34,17 @@ model; nothing in the running agent calls it yet (the first caller is deploy,
   interrupted before its manifest harmless (`interrupt_test.go`)
 - a `generated/` that is a link or not a directory, and a link or file where a
   directory under it should be, is refused before anything is written through
-  it (`symlink_test.go`). A link swapped in between the last check and a write
-  is not caught here; the root's descriptor still keeps it inside the root
+  it (`symlink_test.go`). A pipeline directory with a link on its path is the
+  guard's `changed`
+- the pipeline directory, `generated/` and every directory under it that a run
+  uses are pinned (`projectfs.Path.Pin`) when checked, and each file is reached
+  by its single name in its pinned directory (`tree.go`). A directory swapped
+  for a link later is never written through; one renamed keeps the run's
+  writes in its new place (`swap_test.go`, hooks and a racing goroutine)
+- a failed run's manifest carries over the previous entry for a file it could
+  not write; a killed first run's files are `unowned` to a different model; a
+  run that writes nothing leaves leftover temporary files for the next run that
+  writes (`swap_test.go`)
 - two runs, or a run and an `Inspect`, for one directory in one agent never
   interleave: a lock keyed by the directory's real path (`lock.go`,
   `concurrency_test.go`). Two agent processes are not kept apart

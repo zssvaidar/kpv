@@ -49,13 +49,21 @@ func (p Path) Root() string {
 	return p.owner.real
 }
 
-// Rel returns the path from its root, "." for the root itself. It is the name
-// every operation is performed with, relative to the root's descriptor.
-func (p Path) Rel() string { return p.relative }
+// Rel returns the path from its authorized root, "." for the root itself. For
+// a Path that is not from a pin (pin.go) it is also the name every operation
+// is performed with, relative to the root's descriptor.
+func (p Path) Rel() string {
+	if p.owner != nil && p.owner.pinnedFrom != nil {
+		return filepath.Join(p.owner.base, p.relative)
+	}
+	return p.relative
+}
 
 // IsRoot reports whether this path is an authorized root itself, which is the
 // case a path exactly equal to a root produces.
-func (p Path) IsRoot() bool { return p.owner != nil && p.relative == "." }
+func (p Path) IsRoot() bool {
+	return p.owner != nil && p.relative == "." && (p.owner.pinnedFrom == nil || p.owner.base == ".")
+}
 
 // usable rejects the zero Path. Nothing else can produce a Path with no root,
 // so this is the one way a value that was never resolved could reach an
@@ -67,7 +75,7 @@ func (p Path) usable(op string) error {
 			Message: "this path was never resolved against an authorized project directory",
 		}
 	}
-	if p.owner.revoked.Load() {
+	if p.owner.revoked.Load() || (p.owner.pinnedFrom != nil && p.owner.pinnedFrom.revoked.Load()) {
 		return &PathError{
 			Op: op, Path: p.given, Kind: KindForbidden,
 			Message: "the project directory this path belongs to is no longer authorized",
@@ -85,7 +93,7 @@ func (p Path) usable(op string) error {
 func (p Path) fail(op string, err error) error {
 	fault := &PathError{
 		Op: op, Path: p.given, Resolved: p.real, Root: p.Root(),
-		Location: p.relative, Err: err,
+		Location: p.Rel(), Err: err,
 	}
 	switch {
 	case p.owner.isEscape(err):
@@ -351,6 +359,12 @@ func (p Path) WriteAtomically(perm fs.FileMode, emit func(io.Writer) error) erro
 		return &PathError{
 			Op: "write", Path: p.given, Resolved: p.real, Root: p.Root(), Kind: KindNotDirectory,
 			Message: "an authorized project directory is not a file to write",
+		}
+	}
+	if p.relative == "." {
+		return &PathError{
+			Op: "write", Path: p.given, Resolved: p.real, Root: p.Root(), Kind: KindNotDirectory,
+			Message: "a pinned directory is not a file to write",
 		}
 	}
 	mode := perm

@@ -3,19 +3,28 @@ package codegen
 import (
 	"errors"
 	"io/fs"
-	"strings"
 
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 )
 
 // tree is generated/ inside one pipeline directory, looked at through the
 // guard. Every path in it is relative to generated/.
+//
+// Every directory a run looks into or writes into is pinned (projectfs
+// Path.Pin) the moment it is found to be a real directory, and every file is
+// reached by its single name relative to the pinned directory that holds it.
+// So once a directory has been checked, nothing that happens to its name --
+// renamed away, replaced by a link -- redirects what the run does in it: the
+// run keeps working in the directory it checked, wherever that now is.
 type tree struct {
-	generated projectfs.Path
-	// exists says generated/ is there, as a directory.
+	// pipeline is the pipeline directory, pinned.
+	pipeline *projectfs.PinnedDir
+	// exists says generated/ is there, as a directory, pinned at
+	// directories[""].
 	exists bool
 	// directories remembers what each directory under generated/ was found
-	// to be, so a path deep in an absent directory is not looked up.
+	// to be, "" for generated/ itself, so a path deep in an absent directory
+	// is not looked up, and so a directory found once is the one used after.
 	directories map[string]directoryState
 	// manifestBytes is the manifest as it was read, nil when there is none.
 	manifestBytes []byte
@@ -33,68 +42,133 @@ const (
 
 // directoryState is what a directory under generated/ is; for anything but
 // present and absent, at is the directory that is the trouble, which may be
-// one above the directory asked about.
+// one above the directory asked about. A present directory is held in pin.
 type directoryState struct {
 	condition directoryCondition
 	at        string
 	kind      projectfs.ErrorKind
+	pin       *projectfs.PinnedDir
 }
 
-// openTree looks at generated/ inside dir. A generated/ that is a link, or
-// not a directory, or that the guard refuses, is a problem for the whole run.
+// errNotPinned is a path whose directory was not found to be a real
+// directory. Every caller checks the directory first, so it is a guard
+// against a mistake here, not something a run reports in practice.
+var errNotPinned = errors.New("codegen: the directory holding this path was not checked")
+
+// openTree pins dir and looks at generated/ inside it. A pipeline directory
+// the guard will not pin (a component of its path is now a link: changed;
+// the root revoked: forbidden), or a generated/ that is a link, not a
+// directory, or that the guard refuses, is a problem for the whole run. The
+// tree it returns holds descriptors until close.
 func openTree(dir projectfs.Path) (*tree, *Error) {
-	generated, err := dir.Join(GeneratedDir)
+	pinned, err := dir.Pin()
 	if err != nil {
 		return nil, guardProblem(ProblemGuard, err)
 	}
-	t := &tree{generated: generated, directories: map[string]directoryState{}}
+	t := &tree{pipeline: pinned, directories: map[string]directoryState{}}
+	fail := func(problem *Error) (*tree, *Error) {
+		t.close()
+		return nil, problem
+	}
+	generated, err := pinned.Path().Join(GeneratedDir)
+	if err != nil {
+		return fail(guardProblem(ProblemGuard, err))
+	}
 	info, err := generated.Lstat()
 	switch {
 	case projectfs.IsNotFound(err):
+		t.directories[""] = directoryState{condition: directoryAbsent}
 		return t, nil
 	case err != nil:
-		return nil, guardProblem(ProblemGuard, err)
+		return fail(guardProblem(ProblemGuard, err))
 	case info.Mode()&fs.ModeSymlink != 0:
-		return nil, &Error{Problem: Problem{Kind: ProblemGeneratedIsLink}}
+		return fail(&Error{Problem: Problem{Kind: ProblemGeneratedIsLink}})
 	case !info.IsDir():
-		return nil, &Error{Problem: Problem{Kind: ProblemGeneratedNotDirectory}}
+		return fail(&Error{Problem: Problem{Kind: ProblemGeneratedNotDirectory}})
 	}
+	pin, err := generated.Pin()
+	if err != nil {
+		return fail(guardProblem(ProblemGuard, err))
+	}
+	t.directories[""] = directoryState{condition: directoryPresent, pin: pin}
 	t.exists = true
 	return t, nil
 }
 
-// at is the guard's handle to a path under generated/. Join does not follow
-// links, which is why it is used segment by segment rather than resolving
-// the whole path.
-func (t *tree) at(path string) (projectfs.Path, error) {
-	if path == "" {
-		return t.generated, nil
+// createGenerated makes generated/ in the pinned pipeline directory and pins
+// it. One that appears in the meantime is not adopted: Mkdir fails, and so
+// does the run.
+func (t *tree) createGenerated() error {
+	generated, err := t.pipeline.Path().Join(GeneratedDir)
+	if err != nil {
+		return err
 	}
-	return t.generated.Join(strings.Split(path, "/")...)
+	if err := generated.Mkdir(0o755); err != nil {
+		return err
+	}
+	pin, err := generated.Pin()
+	if err != nil {
+		return err
+	}
+	t.directories[""] = directoryState{condition: directoryPresent, pin: pin}
+	t.exists = true
+	return nil
+}
+
+// close releases every descriptor the tree holds.
+func (t *tree) close() {
+	for _, state := range t.directories {
+		if state.pin != nil {
+			_ = state.pin.Close()
+		}
+	}
+	_ = t.pipeline.Close()
+}
+
+// pinned is the guard's handle to the directory at path under generated/
+// ("" is generated/ itself), which must have been found present.
+func (t *tree) pinned(directory string) (projectfs.Path, error) {
+	state, known := t.directories[directory]
+	if !known || state.pin == nil {
+		return projectfs.Path{}, errNotPinned
+	}
+	return state.pin.Path(), nil
+}
+
+// at is the guard's handle to a file under generated/: its single name,
+// joined to the pinned directory that holds it.
+func (t *tree) at(path string) (projectfs.Path, error) {
+	directory, name := splitPath(path)
+	parent, err := t.pinned(directory)
+	if err != nil {
+		return projectfs.Path{}, err
+	}
+	return parent.Join(name)
 }
 
 // directory is what the directory at path is, checking every directory on
-// the way to it first. "" is generated/ itself.
+// the way to it first. "" is generated/ itself. A directory found present is
+// not looked at again by name: its pin is what is used from then on.
 func (t *tree) directory(path string) directoryState {
-	if path == "" {
-		if t.exists {
-			return directoryState{condition: directoryPresent}
-		}
-		return directoryState{condition: directoryAbsent}
-	}
 	if state, known := t.directories[path]; known {
 		return state
+	}
+	if path == "" {
+		return directoryState{condition: directoryAbsent}
 	}
 	parent, _ := splitPath(path)
 	state := t.directory(parent)
 	if state.condition == directoryPresent {
 		state = t.lookAtDirectory(path)
+	} else {
+		state.pin = nil
 	}
 	t.directories[path] = state
 	return state
 }
 
-// lookAtDirectory describes one directory whose parent is a real directory.
+// lookAtDirectory describes one directory whose parent is a real, pinned
+// directory, and pins it if it is a real directory too.
 func (t *tree) lookAtDirectory(path string) directoryState {
 	handle, err := t.at(path)
 	if err != nil {
@@ -111,7 +185,11 @@ func (t *tree) lookAtDirectory(path string) directoryState {
 	case !info.IsDir():
 		return directoryState{condition: directoryNotDirectory, at: path}
 	}
-	return directoryState{condition: directoryPresent}
+	pin, err := handle.Pin()
+	if err != nil {
+		return directoryState{condition: directoryFailed, at: path, kind: kindOf(err)}
+	}
+	return directoryState{condition: directoryPresent, pin: pin}
 }
 
 // readManifest reads the manifest. A missing one is (nil, nil); one that is
@@ -211,33 +289,32 @@ func (t *tree) examine(file File, entry *manifestEntry) FileReport {
 }
 
 // makeDirectories creates the directories under generated/ that path needs,
-// one at a time, checking each one that is already there again, so a link
-// put in place since the run's checks is refused rather than written through.
-// It returns the report for a path that cannot be written, or nil.
+// one at a time, each by its single name in its pinned parent, and pins each
+// one it creates. A directory already found present is used through its pin
+// and not looked at again by name, so one renamed since keeps the writes and
+// a link put where it was is never followed. Something that appears where a
+// directory is to be made (a link, a file) is refused rather than written
+// through. It returns the report for a path that cannot be written, or nil.
 func (t *tree) makeDirectories(path string) *FileReport {
 	directory, _ := splitPath(path)
 	if directory == "" {
 		return nil
 	}
 	for _, step := range append(parents(directory), directory) {
-		delete(t.directories, step)
-		state := t.lookAtDirectory(step)
+		state := t.directory(step)
 		if state.condition == directoryAbsent {
 			handle, err := t.at(step)
 			if err == nil {
 				err = handle.Mkdir(0o755)
 			}
-			if err == nil {
-				state = directoryState{condition: directoryPresent}
-			} else {
-				// Something may have made it in the meantime; look again.
-				state = t.lookAtDirectory(step)
-				if state.condition == directoryAbsent {
-					state = directoryState{condition: directoryFailed, at: step, kind: kindOf(err)}
-				}
+			// Look again either way: pin what was made, or see what
+			// appeared in the meantime.
+			state = t.lookAtDirectory(step)
+			if state.condition == directoryAbsent {
+				state = directoryState{condition: directoryFailed, at: step, kind: kindOf(err)}
 			}
+			t.directories[step] = state
 		}
-		t.directories[step] = state
 		switch state.condition {
 		case directoryLink:
 			return &FileReport{Path: path, Status: StatusBlocked, Reason: ReasonDirectoryIsLink, At: state.at}
@@ -268,7 +345,7 @@ func (t *tree) removeTemporaries(paths []string) {
 		if t.directory(directory).condition != directoryPresent {
 			continue
 		}
-		handle, err := t.at(directory)
+		handle, err := t.pinned(directory)
 		if err != nil {
 			continue
 		}

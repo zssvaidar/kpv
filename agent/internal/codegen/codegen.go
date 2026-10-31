@@ -33,15 +33,29 @@
 // file is replaced atomically, with Path.WriteAtomically, so a run that fails
 // part-way leaves every file it had not reached holding its previous bytes.
 //
+// Every directory a run looks into or writes into -- the pipeline directory,
+// generated/, and each directory under it -- is held open with projectfs
+// Path.Pin from the moment it is checked, and every file is reached by its
+// single name relative to the pinned directory that holds it. So a directory
+// replaced by a symbolic link at any point after the run checked it, inside
+// the root or not, is never written through: the link is not followed, and
+// what it points at is untouched. A pipeline directory whose path has a link
+// on it when the run starts is refused with the guard's changed error.
+//
+// The same holds when a directory is renamed rather than replaced: the run
+// keeps writing into the directory it checked, in its new place, and its
+// report and manifest describe that directory. The next run finds the old
+// name empty or gone and treats it that way.
+//
+// A first run killed before it has written any manifest leaves files the next
+// run treats like any file no manifest lists: adopted when they hold exactly
+// the bytes it would write, otherwise unowned and not overwritten, so a next
+// run with a different model refuses until they are removed. That fails
+// closed and is accepted; discarding such a file is #70's.
+//
 // What this does not do, written down so the edges are known: two agent
 // processes running against the same directory are not kept apart (two runs
-// in one agent are, see Run); and a directory under generated/ that is
-// replaced by a symbolic link in the moment between its last check and the
-// write below it is not caught here. The kernel still confines that write to
-// the authorized root, because every operation goes through the root's
-// descriptor, so it cannot leave the project, but it could land in src/.
-// Closing that window needs a no-follow open per component, which projectfs
-// does not offer.
+// in one agent are, see Run).
 package codegen
 
 import (

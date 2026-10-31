@@ -18,6 +18,10 @@ leaves a root.
 - a `Path` taken before `Guard.Revoke` or `Guard.Close` stops working
   (`Path.usable`); an operation already past that check finishes
   (`revoke_test.go`)
+- `Path.Pin` (`pin.go`, `pin_test.go`) holds a directory open by its own
+  descriptor, walked one name at a time without following links (a link or a
+  swap is `changed`); Paths from it keep reaching that directory when it is
+  renamed or replaced, and stop with `forbidden` on revoke or `Close`
 - a directory swapped between the check and the open is refused as `changed`,
   never followed (`os.SameFile`; `toctou_test.go`,
   `TestADirectorySwappedBetweenTheCheckAndTheOpenIsRefused`)

@@ -106,6 +106,7 @@ func run(ctx context.Context, dir projectfs.Path, model *pipeline.Pipeline, gene
 	if problem != nil {
 		return stop(problem)
 	}
+	defer t.close()
 	previous, problem := t.readManifest()
 	if problem != nil {
 		return stop(problem)
@@ -143,14 +144,13 @@ func run(ctx context.Context, dir projectfs.Path, model *pipeline.Pipeline, gene
 	// 4. Write.
 	var failure *Error
 	if !t.exists {
-		if err := t.generated.Mkdir(0o755); err != nil {
+		if err := t.createGenerated(); err != nil {
 			for _, planned := range planned {
 				planned.Status = StatusNotWritten
 				report.Files = append(report.Files, planned)
 			}
 			return stop(guardProblem(ProblemGuard, err))
 		}
-		t.exists = true
 	}
 	t.removeTemporaries(append(paths, sortedPaths(previous)...))
 	for i, file := range outputs {
@@ -186,10 +186,16 @@ func run(ctx context.Context, dir projectfs.Path, model *pipeline.Pipeline, gene
 				planned[i] = again
 				continue
 			}
-			if again.Reason == "" {
-				again.Reason = ReasonChangedDuringRun
-			}
 			planned[i] = again
+			if again.Status == StatusFailed {
+				// The guard refused the look (the root revoked) or the
+				// filesystem failed: a failure, not a conflict.
+				failure = &Error{Problem: Problem{Kind: ProblemWriteFailed, GuardKind: again.Kind}}
+				continue
+			}
+			if again.Reason == "" {
+				planned[i].Reason = ReasonChangedDuringRun
+			}
 			failure = &Error{Problem: Problem{Kind: ProblemConflicts}}
 			continue
 		}

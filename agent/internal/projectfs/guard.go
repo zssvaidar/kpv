@@ -95,6 +95,13 @@ type root struct {
 	// and compared against afterwards. See escapeSentinel.
 	escapeOnce sync.Once
 	escaped    error
+
+	// pinnedFrom is set only on a root that stands for a directory held open
+	// by Path.Pin (pin.go): it is the authorized root that directory is in,
+	// whose revocation stops the pin too. base is the pinned directory's path
+	// from that root. Both are zero on an authorized root.
+	pinnedFrom *root
+	base       string
 }
 
 // release ends this root's authorization: first the flag every Path checks,
