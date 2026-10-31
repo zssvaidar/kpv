@@ -18,12 +18,23 @@
 //
 // Every filesystem operation goes through the projectfs guard, and this
 // package makes no filesystem call of its own (projectfs/boundary_test.go).
-// A file is reached with Path.Join and Lstat, so a .env or .gitignore that is
-// a symbolic link is reported and never read, written through or replaced.
-// What is not caught: a link swapped in at one of those names in the moment
-// between the Lstat and the open or the rename. The root's descriptor still
-// keeps that inside the authorized root; closing the window needs a no-follow
-// open, which projectfs does not offer.
+// The pipeline directory must be given as its real path, and each ReadEnv,
+// WriteEnv and WriteGitignore pins it once (projectfs.Path.Pin) before
+// anything is read and closes the pin before it returns. A link anywhere on
+// the directory's path, there when the call is made or swapped in before the
+// pin, is refused as the guard's changed. Once pinned, every Lstat, read,
+// listing, removal and atomic write reaches .env, .gitignore and the
+// temporary files by their single names through the pin, so both files land
+// in the directory that was checked: one renamed during a call, or replaced
+// at its name by a link, keeps getting that call's writes under its new name,
+// and a .env is never written where the .gitignore just written is not.
+//
+// A .env or .gitignore that is a symbolic link is reported and never read,
+// written through or replaced. What remains is a link swapped in at one of
+// those two names itself, between its Lstat and its open or rename. At worst
+// that reads a file inside the pinned directory, or replaces that link with
+// the regular file being written; the pin keeps it from reaching outside the
+// pipeline directory.
 //
 // Every message, error and log line names files, line numbers and keys, never
 // a value or the content of a line.

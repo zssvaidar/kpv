@@ -84,12 +84,19 @@ func (f fanout) WithGroup(name string) slog.Handler {
 
 func newProject(t *testing.T) *project {
 	t.Helper()
+	return newProjectAt(t, "pipe")
+}
+
+// newProjectAt is newProject with the pipeline directory at relative inside
+// the root.
+func newProjectAt(t *testing.T, relative string) *project {
+	t.Helper()
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Join(base, "project")
-	pipe := filepath.Join(root, "pipe")
+	pipe := filepath.Join(root, relative)
 	write(t, filepath.Join(pipe, "pipeline.yaml"), "id: orders\n")
 	write(t, filepath.Join(pipe, "src", "handler.go"), "package src // the user's code\n")
 	write(t, filepath.Join(pipe, "generated", "main.go"), "package main\n")
@@ -115,9 +122,15 @@ func (p *project) gitignore(t *testing.T) string { return read(t, p.path(Gitigno
 // outside the scratch directory.
 func (p *project) ceiling() string { return filepath.Dir(p.root) }
 
+// change sets values and removes keys in one write.
+func (p *project) change(t *testing.T, values map[string]string, remove ...string) (Report, error) {
+	t.Helper()
+	return p.files.WriteEnv(context.Background(), p.pipe, secretsOf(values), remove)
+}
+
 func (p *project) write(t *testing.T, values map[string]string) (Report, error) {
 	t.Helper()
-	return p.files.WriteEnv(context.Background(), p.pipe, secretsOf(values))
+	return p.files.WriteEnv(context.Background(), p.pipe, secretsOf(values), nil)
 }
 
 func secretsOf(values map[string]string) map[string]Secret {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,6 +88,25 @@ func TestAKnownValueAppearsInNoErrorAndNoLogLine(t *testing.T) {
 			p.files.hooks.envEmit = func() error { return fmt.Errorf("interrupted with %v", NewSecret(canary)) }
 			return p.pipe, value
 		},
+		"link in path": func(p *project) (string, map[string]string) {
+			write(p.t, p.path(EnvFile), "KNOWN="+canary+"\n")
+			alias := filepath.Join(p.root, "alias")
+			_ = os.Symlink(p.pipe, alias)
+			return alias, value
+		},
+		"swapped before pin": func(p *project) (string, map[string]string) {
+			write(p.t, p.path(EnvFile), "KNOWN="+canary+"\n")
+			p.files.hooks.beforePin = func() {
+				if _, err := os.Lstat(p.pipe + ".moved"); err == nil {
+					return
+				}
+				_ = os.Rename(p.pipe, p.pipe+".moved")
+				_ = os.Symlink(p.pipe+".moved", p.pipe)
+			}
+			return p.pipe, value
+		},
+		"set and removed": func(p *project) (string, map[string]string) { return p.pipe, value },
+		"invalid remove":  func(p *project) (string, map[string]string) { return p.pipe, value },
 		"revoked": func(p *project) (string, map[string]string) {
 			_, _ = p.guard.Revoke(p.root)
 			return p.pipe, value
@@ -97,7 +117,8 @@ func TestAKnownValueAppearsInNoErrorAndNoLogLine(t *testing.T) {
 			t.Parallel()
 			p := newProject(t)
 			dir, values := setup(p)
-			report, err := p.files.WriteEnv(context.Background(), dir, secretsOf(values))
+			remove := map[string][]string{"set and removed": {"KNOWN"}, "invalid remove": {"1BAD"}}[name]
+			report, err := p.files.WriteEnv(context.Background(), dir, secretsOf(values), remove)
 			env, readErr := p.files.ReadEnv(dir)
 			_, gitErr := p.files.WriteGitignore(context.Background(), dir)
 			var out strings.Builder

@@ -16,9 +16,12 @@ const (
 	// KindInvalidKey is a key that is not an environment variable name,
 	// [A-Za-z_][A-Za-z0-9_]*. Nothing is written.
 	KindInvalidKey Kind = "invalidKey"
-	// KindInvalidValue is a value holding a line break or a NUL byte, which no
-	// .env line can carry. Nothing is written.
+	// KindInvalidValue is a value holding a line feed, a carriage return or a
+	// NUL byte, which no .env line can carry. Nothing is written.
 	KindInvalidValue Kind = "invalidValue"
+	// KindSetAndRemoved is a key one write names both to set and to remove.
+	// Nothing is written.
+	KindSetAndRemoved Kind = "setAndRemoved"
 	// KindSetOutsideBlock is a key the write was asked to set that a user line
 	// outside the marker block already sets. Nothing is written, and the
 	// user's line is left alone; #68 relies on this to stop a deploy.
@@ -29,8 +32,10 @@ const (
 	// entry. A warning; the line is kept as it is.
 	KindMalformedLine Kind = "malformedLine"
 	// KindBlockEdited is a marker block whose lines are not the ones this
-	// package last wrote there: a user line moved or edited inside it.
-	// Nothing is written.
+	// package last wrote there: a user line moved or edited inside it, found
+	// because the lines no longer hash to the SHA-256 the end marker holds.
+	// Nothing is written. Deleting the whole block, both markers included,
+	// clears it, and the next write appends a new one.
 	KindBlockEdited Kind = "blockEdited"
 	// KindMarkers is a file whose markers do not make exactly one block: a
 	// start with no end, an end before a start, or two blocks. Nothing is
@@ -45,7 +50,7 @@ const (
 	// KindTooLarge is a file larger than MaxFileSize. It is not read.
 	KindTooLarge Kind = "tooLarge"
 	// KindRefused is a refusal or failure of the projectfs guard; Guard holds
-	// its kind (forbidden, unreadable, notFound, io, ...).
+	// its kind (forbidden, changed, unreadable, notFound, io, ...).
 	KindRefused Kind = "refused"
 	// KindNotIgnored is a .gitignore with a user line that un-ignores a name
 	// the block would ignore. A warning; the line is kept, and the block does
@@ -202,6 +207,8 @@ func guardProblem(file string, err error) Problem {
 		message = "cannot be read or written by this process"
 	case projectfs.KindNotDirectory:
 		message = "a component of the path is not a directory"
+	case projectfs.KindChanged:
+		message = "a directory on the way to the pipeline directory is a symbolic link, or changed while it was being opened"
 	default:
 		message = "the filesystem operation failed (" + string(kind) + ")"
 	}

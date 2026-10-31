@@ -246,12 +246,15 @@ func analyzeEnv(lines []line, found block) envAnalysis {
 	return analysis
 }
 
-// envBody is the block's lines: the block's existing entries with values set
-// over them, sorted by key.
-func envBody(existing map[string]string, values map[string]Secret) []string {
+// envBody is the block's lines: the block's existing entries less the keys
+// removed, with values set over them, sorted by key. A key is never both set
+// and removed; the write refuses that before it gets here.
+func envBody(existing map[string]string, values map[string]Secret, removed map[string]bool) []string {
 	merged := make(map[string]string, len(existing)+len(values))
 	for key, value := range existing {
-		merged[key] = value
+		if !removed[key] {
+			merged[key] = value
+		}
 	}
 	for key, value := range values {
 		merged[key] = value.Reveal()

@@ -166,7 +166,7 @@ func TestAPipelineDirectoryOutsideTheRootIsTheGuardsForbidden(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, dir := range []string{outside, filepath.Join(p.root, "escape"), filepath.Join(p.root, "..", "x")} {
-		_, err := p.files.WriteEnv(context.Background(), dir, secretsOf(map[string]string{"K": canary}))
+		_, err := p.files.WriteEnv(context.Background(), dir, secretsOf(map[string]string{"K": canary}), nil)
 		refusal := refusedWith(t, err, KindRefused)
 		if refusal[0].Guard != projectfs.KindForbidden || !projectfs.IsForbidden(err) {
 			t.Fatalf("%s: %+v", dir, refusal)
@@ -201,7 +201,7 @@ func TestARevokedRootIsTheGuardsForbidden(t *testing.T) {
 func TestAMissingPipelineDirectoryIsReported(t *testing.T) {
 	t.Parallel()
 	p := newProject(t)
-	_, err := p.files.WriteEnv(context.Background(), p.path("missing"), nil)
+	_, err := p.files.WriteEnv(context.Background(), p.path("missing"), nil, nil)
 	if refusedWith(t, err, KindRefused)[0].Guard != projectfs.KindNotFound {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestACancelledWaitWritesNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	before := snapshot(t, p.pipe)
-	if _, err := p.files.WriteEnv(ctx, p.pipe, nil); !errors.Is(err, context.Canceled) {
+	if _, err := p.files.WriteEnv(ctx, p.pipe, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	sameSnapshot(t, before, snapshot(t, p.pipe))

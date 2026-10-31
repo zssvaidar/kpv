@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"path"
 	"sort"
 	"strings"
 
@@ -37,6 +38,15 @@ type hooks struct {
 	// envEmit runs while the new .env is being written to its temporary
 	// file, which exists then; an error from it fails the write there.
 	envEmit func() error
+	// beforePin runs after the pipeline directory was resolved and checked,
+	// just before it is pinned.
+	beforePin func()
+	// beforeGitignore runs after every check, just before the .gitignore
+	// write.
+	beforeGitignore func()
+	// betweenWrites runs after the .gitignore write and before the .env
+	// write.
+	betweenWrites func()
 }
 
 // New returns Files over guard. Every problem a write or read finds is
@@ -62,12 +72,18 @@ type Env struct {
 
 // ReadEnv reads the .env at the root of the pipeline directory dir.
 func (f *Files) ReadEnv(dir string) (Env, error) {
-	directory, problem, guardErr := f.resolve(dir)
+	resolved, problem, guardErr := f.resolve(dir)
 	if problem != nil {
 		f.log("read", []Problem{*problem})
 		return Env{}, refusal("read", []Problem{*problem}, guardErr)
 	}
-	state, problems, guardErr := load(directory, EnvFile)
+	pinned, problem, guardErr := f.pin(resolved)
+	if problem != nil {
+		f.log("read", []Problem{*problem})
+		return Env{}, refusal("read", []Problem{*problem}, guardErr)
+	}
+	defer closePin(pinned)
+	state, problems, guardErr := load(pinned.Path(), EnvFile)
 	if refused := refusal("read", problems, guardErr); refused != nil {
 		f.log("read", problems)
 		return Env{}, refused
@@ -94,17 +110,22 @@ func (f *Files) ReadEnv(dir string) (Env, error) {
 // WriteEnv does first.
 func (f *Files) WriteGitignore(ctx context.Context, dir string) (Report, error) {
 	report := Report{Gitignore: NotWritten}
-	directory, problem, guardErr := f.resolve(dir)
+	resolved, problem, guardErr := f.resolve(dir)
 	if problem != nil {
 		return f.refuse("gitignore", report, []Problem{*problem}, guardErr)
 	}
-	release, err := lockDirectory(ctx, directory.Real())
+	release, err := lockDirectory(ctx, resolved.Real())
 	if err != nil {
 		return report, err
 	}
 	defer release()
+	pinned, problem, guardErr := f.pin(resolved)
+	if problem != nil {
+		return f.refuse("gitignore", report, []Problem{*problem}, guardErr)
+	}
+	defer closePin(pinned)
 
-	gitignore, problems, guardErr := load(directory, GitignoreFile)
+	gitignore, problems, guardErr := load(pinned.Path(), GitignoreFile)
 	problems = append(problems, gitignore.problems...)
 	if refused := refusal("gitignore", problems, guardErr); refused != nil {
 		return f.refuse("gitignore", report, problems, guardErr)
@@ -112,61 +133,60 @@ func (f *Files) WriteGitignore(ctx context.Context, dir string) (Report, error) 
 	return f.writeGitignore(ctx, report, gitignore)
 }
 
-// WriteEnv sets values in the .env at the root of the pipeline directory dir,
-// after writing the .gitignore block that ignores it.
+// WriteEnv sets the keys in set and removes the keys in remove in the .env at
+// the root of the pipeline directory dir, after writing the .gitignore block
+// that ignores it.
 //
 // It is a merged write. The block of .env ends up holding the entries it held
-// before with every key in values set to its value, sorted by key; nothing
-// outside the block is changed, and an empty values still leaves a block. The
-// order is fixed: every key, value and both files are checked first, and a
-// problem with any of them writes nothing; then .gitignore is written, and
-// only when that succeeded is .env written. Each file is replaced atomically.
+// before, less every key in remove, with every key in set at its value,
+// sorted by key; nothing outside the block is changed, and a write that sets
+// nothing, or removes every key, still leaves an empty block. Removing a key
+// the block does not hold changes nothing and is not an error, and so is
+// removing a key only a user line outside the block sets: that line is left
+// alone, with no refusal and no warning. Setting and removing happen in the
+// one atomic replacement of .env.
 //
-// It is refused, with nothing written, for a key that is not a variable
-// name, a value with a line break or NUL byte, a key a user line outside the
+// The order is fixed: every key, value and both files are checked first, and
+// a problem with any of them writes nothing; then .gitignore is written, and
+// only when that succeeded is .env written. Each file is replaced atomically.
+// The pipeline directory is pinned (projectfs.Path.Pin) once, before anything
+// is read, and both files are reached by their single names through that pin,
+// so both land in the directory that was checked even when it is renamed or
+// a link is put at its name during the call.
+//
+// It is refused, with nothing written, for a key to set or remove that is not
+// a variable name, a key named both to set and to remove, a value with a line
+// feed, carriage return or NUL byte, a key to set that a user line outside the
 // block already sets, a file that is a link, not a regular file, too large or
 // unreadable, a block whose lines were edited, markers that do not make one
-// block, and a pipeline directory the guard refuses. The error is an *Error
-// naming files, lines and keys, never a value.
+// block, and a pipeline directory the guard refuses or whose path has a link
+// in it. The error is an *Error naming files, lines and keys, never a value.
 //
 // Two writes for one directory in one agent do not interleave: the second
 // waits for the first, or for ctx.
-func (f *Files) WriteEnv(ctx context.Context, dir string, values map[string]Secret) (Report, error) {
+func (f *Files) WriteEnv(ctx context.Context, dir string, set map[string]Secret, remove []string) (Report, error) {
 	report := Report{Gitignore: NotWritten, Env: NotWritten}
 
-	var problems []Problem
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		switch {
-		case !validKey(key):
-			problems = append(problems, Problem{
-				Kind: KindInvalidKey, Key: key,
-				Message: "this key is not an environment variable name ([A-Za-z_][A-Za-z0-9_]*)",
-			})
-		case !validValue(values[key].Reveal()):
-			problems = append(problems, Problem{
-				Kind: KindInvalidValue, Key: key,
-				Message: "this key's value holds a line break or a NUL byte, which a .env line cannot carry",
-			})
-		}
-	}
+	keys, removed, problems := checkChange(set, remove)
 	if len(problems) > 0 {
 		return f.refuse("write", report, problems, nil)
 	}
 
-	directory, problem, guardErr := f.resolve(dir)
+	resolved, problem, guardErr := f.resolve(dir)
 	if problem != nil {
 		return f.refuse("write", report, []Problem{*problem}, guardErr)
 	}
-	release, err := lockDirectory(ctx, directory.Real())
+	release, err := lockDirectory(ctx, resolved.Real())
 	if err != nil {
 		return report, err
 	}
 	defer release()
+	pinned, problem, guardErr := f.pin(resolved)
+	if problem != nil {
+		return f.refuse("write", report, []Problem{*problem}, guardErr)
+	}
+	defer closePin(pinned)
+	directory := pinned.Path()
 
 	gitignore, gitProblems, gitGuard := load(directory, GitignoreFile)
 	env, envProblems, envGuard := load(directory, EnvFile)
@@ -202,10 +222,13 @@ func (f *Files) WriteEnv(ctx context.Context, dir string, values map[string]Secr
 		return report, err
 	}
 	report.Problems = append(report.Problems, problems...)
+	if f.hooks.betweenWrites != nil {
+		f.hooks.betweenWrites()
+	}
 
 	report.Problems = append(report.Problems, removeLeftovers(directory)...)
 
-	body := envBody(analysis.block, values)
+	body := envBody(analysis.block, set, removed)
 	next := compose(env.lines, env.block, body)
 	switch {
 	case env.exists && next == string(env.data):
@@ -250,6 +273,9 @@ func (f *Files) writeGitignore(ctx context.Context, report Report, gitignore fil
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
+	if f.hooks.beforeGitignore != nil {
+		f.hooks.beforeGitignore()
+	}
 	err := gitignore.path.WriteAtomically(gitignoreMode, func(out io.Writer) error {
 		_, err := io.WriteString(out, next)
 		return err
@@ -282,17 +308,84 @@ func (f *Files) refuse(op string, report Report, problems []Problem, guardErr er
 	return report, refusal(op, problems, guardErr)
 }
 
-// resolve checks the pipeline directory with the guard.
+// checkChange checks the keys and values of a write before anything is
+// read: it returns the keys to set, sorted, and the set of keys to remove.
+func checkChange(set map[string]Secret, remove []string) ([]string, map[string]bool, []Problem) {
+	var problems []Problem
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	removed := make(map[string]bool, len(remove))
+	var removeKeys []string
+	for _, key := range remove {
+		if !removed[key] {
+			removed[key] = true
+			removeKeys = append(removeKeys, key)
+		}
+	}
+	sort.Strings(removeKeys)
+	for _, key := range keys {
+		switch {
+		case !validKey(key):
+			problems = append(problems, Problem{
+				Kind: KindInvalidKey, Key: key,
+				Message: "this key is not an environment variable name ([A-Za-z_][A-Za-z0-9_]*)",
+			})
+		case removed[key]:
+			problems = append(problems, Problem{
+				Kind: KindSetAndRemoved, Key: key,
+				Message: "this key is named both to set and to remove in one write",
+			})
+		case !validValue(set[key].Reveal()):
+			problems = append(problems, Problem{
+				Kind: KindInvalidValue, Key: key,
+				Message: "this key's value holds a line feed, a carriage return or a NUL byte, which a .env line cannot carry",
+			})
+		}
+	}
+	for _, key := range removeKeys {
+		if _, alsoSet := set[key]; !alsoSet && !validKey(key) {
+			problems = append(problems, Problem{
+				Kind: KindInvalidKey, Key: key,
+				Message: "this key to remove is not an environment variable name ([A-Za-z_][A-Za-z0-9_]*)",
+			})
+		}
+	}
+	return keys, removed, problems
+}
+
+// resolve checks the pipeline directory with the guard. dir must be the
+// directory's real path: one the guard resolves to anywhere else has a
+// symbolic link on its way (or is relative), and a link there is how the
+// directory would be swapped for another, so it is refused as changed.
 func (f *Files) resolve(dir string) (projectfs.Path, *Problem, error) {
 	directory, err := f.guard.Resolve(dir)
 	if err != nil {
 		problem := guardProblem("", err)
 		return projectfs.Path{}, &problem, err
 	}
-	info, err := directory.Stat()
+	if path.Clean(dir) != directory.Real() {
+		err := &projectfs.PathError{
+			Op: "resolve", Path: dir, Resolved: directory.Real(), Root: directory.Root(),
+			Kind: projectfs.KindChanged, Message: notRealPath,
+		}
+		return projectfs.Path{}, &Problem{Kind: KindRefused, Guard: projectfs.KindChanged, Message: notRealPath}, err
+	}
+	// Lstat, not Stat: the path is real, so a link at it now was swapped in
+	// after Resolve, and following it is what the pin is there to prevent.
+	info, err := directory.Lstat()
 	if err != nil {
 		problem := guardProblem("", err)
 		return projectfs.Path{}, &problem, err
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		err := &projectfs.PathError{
+			Op: "resolve", Path: dir, Resolved: directory.Real(), Root: directory.Root(),
+			Kind: projectfs.KindChanged, Message: notRealPath,
+		}
+		return projectfs.Path{}, &Problem{Kind: KindRefused, Guard: projectfs.KindChanged, Message: notRealPath}, err
 	}
 	if !info.IsDir() {
 		return projectfs.Path{}, &Problem{
@@ -302,6 +395,26 @@ func (f *Files) resolve(dir string) (projectfs.Path, *Problem, error) {
 	}
 	return directory, nil, nil
 }
+
+const notRealPath = "the pipeline directory was not given as its real path: a component of it is a symbolic link, or it is relative"
+
+// pin holds the resolved pipeline directory open for the rest of the call. A
+// component that is now a link is the guard's changed.
+func (f *Files) pin(directory projectfs.Path) (*projectfs.PinnedDir, *Problem, error) {
+	if f.hooks.beforePin != nil {
+		f.hooks.beforePin()
+	}
+	pinned, err := directory.Pin()
+	if err != nil {
+		problem := guardProblem("", err)
+		return nil, &problem, err
+	}
+	return pinned, nil, nil
+}
+
+// closePin releases a pin. Nothing is written through it after this, so a
+// failure to close has nothing to report.
+func closePin(pinned *projectfs.PinnedDir) { _ = pinned.Close() }
 
 // log writes one warning line per problem. A line carries the kind, the file
 // name, lines and key, never a path or a value.
@@ -344,8 +457,9 @@ type fileState struct {
 
 func (s fileState) readable() bool { return s.path != (projectfs.Path{}) }
 
-// load reaches the named file in directory without following a link at its
-// name, and reads it if it is a regular file no larger than MaxFileSize.
+// load reaches the named file in directory, the pinned pipeline directory, by
+// its single name without following a link at that name, and reads it if it
+// is a regular file no larger than MaxFileSize.
 func load(directory projectfs.Path, name string) (fileState, []Problem, error) {
 	state := fileState{name: name}
 	path, err := directory.Join(name)
@@ -426,7 +540,7 @@ func warnings(problems []Problem) []Problem {
 }
 
 // removeLeftovers removes the temporary files an interrupted write of either
-// file left in directory: regular files named ".<name>.tmp-*". A link or
+// file left in directory, the pinned pipeline directory: regular files named ".<name>.tmp-*". A link or
 // anything else by that name is left alone.
 func removeLeftovers(directory projectfs.Path) []Problem {
 	entries, err := directory.ReadDir()
