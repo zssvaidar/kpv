@@ -2,15 +2,17 @@
 
 Credentials (#23): the one type a value travels in, and the merged writes of
 `.env` and `.gitignore` at a pipeline root. The package comment in `doc.go`
-explains the model; nothing in the running agent calls it yet (the first
-caller is deploy, #68; #24 uses `Secret` for stored credentials, #74 writes the
-`.gitignore` block when a pipeline is created).
+explains the model; the running agent uses `Secret` for stored connection
+credentials (#24); deploy (#68) is the first caller of the `.env` writes, and
+#74 writes the `.gitignore` block when a pipeline is created.
 
 - `Secret` (`secret.go`) formats, logs and marshals as `Secret(redacted)` and
   keeps the plaintext in a closure, not a field, for the reason
   `internal/httpapi/token.go` gives. `Reveal` is the only way to the value;
   its one caller here is the `.env` writer (`secret_test.go`, including a
-  panic in a child process)
+  panic in a child process). Outside this package, the one caller is the
+  connection store's file write, `encodeStore` in `internal/connections`
+  (#24, held by its `source_test.go`)
 - `Files` (`files.go`) takes the guard and a pipeline directory as a string,
   so a directory outside the roots is the guard's `forbidden`, carried as
   `KindRefused` with `Guard` set. It writes only `.env` and `.gitignore` in

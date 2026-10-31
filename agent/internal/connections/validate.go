@@ -50,6 +50,8 @@ const (
 	definitionConnection = "connection"
 	definitionUpdate     = "connectionUpdate"
 	definitionDelete     = "connectionDelete"
+	definitionPassword   = "saslPassword"
+	definitionKey        = "privateKeyPem"
 )
 
 func schemas() (*compiled, error) {
@@ -65,7 +67,7 @@ func schemas() (*compiled, error) {
 			return
 		}
 		set := &compiled{definitions: map[string]*jsonschema.Schema{}}
-		for _, name := range []string{definitionConnection, definitionUpdate, definitionDelete} {
+		for _, name := range []string{definitionConnection, definitionUpdate, definitionDelete, definitionPassword, definitionKey} {
 			schema, err := compiler.Compile(schemaID + "#/$defs/" + name)
 			if err != nil {
 				compileErr = fmt.Errorf("compile the connection schema's %s: %w", name, err)
@@ -150,6 +152,10 @@ func messageOf(errorKind jsonschema.ErrorKind) string {
 		return "this is not one of the allowed values"
 	case *kind.Type:
 		return "this has the wrong type"
+	case *kind.MinLength:
+		return "this is empty"
+	case *kind.MaxLength:
+		return "this is too long"
 	case *kind.AdditionalProperties:
 		return "this holds a field it does not have"
 	case *kind.UniqueItems:

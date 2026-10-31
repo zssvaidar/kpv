@@ -40,20 +40,24 @@ type storeDocument struct {
 	Roots   []string `json:"roots"`
 }
 
-type rootStore struct {
+// privateFile is one small file of the agent's own, kept to its owner: the
+// roots store, and the files beside it that OpenPrivateFile hands out (the
+// connection store, #24). Reading it, moving an unreadable one aside, and
+// replacing it atomically are the same for each.
+type privateFile struct {
 	file string
-	// real is the store directory's real path, which no root may contain or
+	// real is the file's directory's real path, which no root may contain or
 	// be inside: a project that held the store could rewrite the set of
-	// directories the agent may write to.
+	// directories the agent may write to, or read its credentials.
 	real string
 	// pendingBackup says the file on disk could not be read, and has to be
 	// moved aside before anything is written over it.
 	pendingBackup bool
 }
 
-func newRootStore(file string) *rootStore {
+func newPrivateFile(file string) *privateFile {
 	file = filepath.Clean(file)
-	store := &rootStore{file: file, real: filepath.Dir(file)}
+	store := &privateFile{file: file, real: filepath.Dir(file)}
 	// The directory need not exist yet: it is made by the first write. Its
 	// real path is what it will be, the existing part resolved and the rest
 	// as written.
@@ -65,7 +69,7 @@ func newRootStore(file string) *rootStore {
 
 // overlaps reports whether a root at real would contain the store directory
 // or be inside it.
-func (s *rootStore) overlaps(realDir string) bool {
+func (s *privateFile) overlaps(realDir string) bool {
 	if _, ok := within(realDir, s.real); ok {
 		return true
 	}
@@ -73,23 +77,47 @@ func (s *rootStore) overlaps(realDir string) bool {
 	return ok
 }
 
-// load reads the stored paths. A missing file is no roots and no problem; a
-// file that cannot be read, or is not exactly the document above, is no roots
-// and a problem kind, and is marked to be moved aside before any write.
-func (s *rootStore) load() ([]string, ErrorKind) {
+// read returns the file's bytes and whether it exists. A missing file is not
+// a problem; a file that cannot be read, or is over maxStoreBytes, is
+// storeUnreadable or storeCorrupt and is marked to be moved aside before any
+// write.
+func (s *privateFile) read() ([]byte, bool, ErrorKind) {
 	file, err := os.Open(s.file)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, ""
+		return nil, false, ""
 	}
 	if err != nil {
 		s.pendingBackup = true
-		return nil, storeUnreadable
+		return nil, true, storeUnreadable
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maxStoreBytes+1))
 	_ = file.Close()
 	if err != nil {
 		s.pendingBackup = true
-		return nil, storeUnreadable
+		return nil, true, storeUnreadable
+	}
+	if len(raw) > maxStoreBytes {
+		s.pendingBackup = true
+		return nil, true, storeCorrupt
+	}
+	return raw, true, ""
+}
+
+type rootStore struct {
+	*privateFile
+}
+
+func newRootStore(file string) *rootStore {
+	return &rootStore{privateFile: newPrivateFile(file)}
+}
+
+// load reads the stored paths. A missing file is no roots and no problem; a
+// file that cannot be read, or is not exactly the document above, is no roots
+// and a problem kind, and is marked to be moved aside before any write.
+func (s *rootStore) load() ([]string, ErrorKind) {
+	raw, found, problem := s.read()
+	if problem != "" || !found {
+		return nil, problem
 	}
 	paths, ok := parseStore(raw)
 	if !ok {
@@ -135,7 +163,7 @@ func parseStore(raw []byte) ([]string, bool) {
 
 // moveAside renames a store that could not be read to a backup of its own,
 // never over an earlier backup, and clears the mark once it is out of the way.
-func (s *rootStore) moveAside() error {
+func (s *privateFile) moveAside() error {
 	if !s.pendingBackup {
 		return nil
 	}
@@ -161,11 +189,20 @@ func (s *rootStore) moveAside() error {
 	return &PathError{Op: "store", Kind: KindIO, Message: "no free name was found to move the unreadable store aside to"}
 }
 
-// save replaces the store with paths, atomically: a new file only its owner
-// can read, written in full and flushed, then renamed over the old one. A
-// store that could not be read is moved aside first, and if it cannot be,
-// nothing is written.
+// save replaces the store with paths, atomically.
 func (s *rootStore) save(paths []string) error {
+	body, err := json.MarshalIndent(storeDocument{Version: storeVersion, Roots: append([]string{}, paths...)}, "", "  ")
+	if err != nil {
+		return &PathError{Op: "store", Kind: KindIO, Message: "the store could not be encoded", Err: err}
+	}
+	return s.write(append(body, '\n'))
+}
+
+// write replaces the file with body, atomically: a new file only its owner
+// can read, written in full and flushed, then renamed over the old one, in a
+// directory only its owner can enter. A file that could not be read is moved
+// aside first, and if it cannot be, nothing is written.
+func (s *privateFile) write(body []byte) error {
 	fail := func(message string, err error) error {
 		return &PathError{Op: "store", Kind: KindIO, Message: message, Err: err}
 	}
@@ -176,11 +213,11 @@ func (s *rootStore) save(paths []string) error {
 	if err := os.MkdirAll(directory, storeDirectoryMode); err != nil {
 		return fail("the store's directory could not be made", err)
 	}
-	body, err := json.MarshalIndent(storeDocument{Version: storeVersion, Roots: append([]string{}, paths...)}, "", "  ")
-	if err != nil {
-		return fail("the store could not be encoded", err)
+	// The directory is the agent's own, so it is given its mode whatever the
+	// umask made it, and whatever an earlier version left.
+	if err := os.Chmod(directory, storeDirectoryMode); err != nil {
+		return fail("the store's directory could not be given its mode", err)
 	}
-	body = append(body, '\n')
 
 	suffix := make([]byte, 8)
 	if _, err := rand.Read(suffix); err != nil {

@@ -41,6 +41,12 @@ Project roots (`roots.go`, `store.go`, tests in `roots_test.go`, `gone_test.go`)
   store is logged by kind, the agent starts with no roots, and it is moved to
   `roots.json.corrupt-<UTC time>` before anything is written; if it cannot be
   moved, nothing is written over it and an authorization answers `io`
+- `OpenPrivateFile(roots, name)` (`private.go`, #24) hands out another file of the
+  agent's own in the store's directory (the connection store), with the same
+  read, move-aside and atomic `0600` write as the roots store; the directory
+  is made `0700` on every write whatever the umask. Being in that directory
+  is what keeps it outside every root. No store: it is nil. A function, not a
+  `Roots` method, so a holder of `Roots` (httpapi) cannot reach it
 - every stored root is checked again at startup, and again whenever something
   asks about it: every list, every authorize, every browse that lands in it
   (#67). One that is gone is `notFound`, `notDirectory` or `unreadable`; another

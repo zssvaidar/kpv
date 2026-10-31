@@ -30,7 +30,8 @@ const Redacted = "Secret(redacted)"
 //     the placeholder for the same reasons.
 //
 // The one way to the value is Reveal, and the one caller of it in this package
-// is the .env writer. A Secret is not comparable with ==, which is deliberate:
+// is the .env writer. Outside it, the one caller is the connection store's
+// file write (internal/connections, encodeStore, #24). A Secret is not comparable with ==, which is deliberate:
 // compare Reveal() results where a comparison is really needed.
 //
 // The zero Secret holds the empty value.

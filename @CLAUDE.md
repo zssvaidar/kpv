@@ -22,6 +22,8 @@ Areas
   pipeline document
 - `agent/internal/catalog/CLAUDE.md` - where a pipeline lives: the pipeline
   list, open, create, and reading and writing `pipeline.yaml`
+- `agent/internal/connections/CLAUDE.md` - named Kafka connections: the
+  record and its rules, the credential store, the reference check
 - `agent/internal/projectfs/CLAUDE.md` - the path guard and authorized project
   roots
 - `agent/internal/codegen/CLAUDE.md` - generating files into `generated/`, the
