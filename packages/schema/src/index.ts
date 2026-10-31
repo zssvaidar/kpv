@@ -1,12 +1,13 @@
 // @kpv/schema is the pipeline model for the TypeScript side of kpv, plus the
 // envelope the agent pushes over its WebSocket channel, the answer its
-// directory browsing endpoint gives, and what its project root endpoints take
-// and answer.
+// directory browsing endpoint gives, and what its project root and pipeline
+// endpoints take and answer.
 //
 // Everything about either comes from a JSON Schema in schema/, which is the
 // single source of truth: the types and the Zod schemas in ./generated are
 // generated from schema/pipeline.schema.json, schema/channel.schema.json,
-// schema/directory.schema.json and schema/roots.schema.json by
+// schema/directory.schema.json, schema/roots.schema.json and
+// schema/pipelines.schema.json by
 // `pnpm run generate` and are never hand-edited. This file only decides what
 // the package exposes.
 
@@ -45,6 +46,14 @@ export { directoryJsonSchema } from './generated/directory-json-schema.js';
 export type * from './generated/roots-types.js';
 export * from './generated/roots-zod.js';
 export { rootsJsonSchema } from './generated/roots-json-schema.js';
+
+// The pipeline endpoints (#48): the pipeline list, an opened pipeline, the
+// body a create sends, and the error a request that could not be served gets.
+// Generated from schema/pipelines.schema.json, the same file the agent's Go
+// structs come from.
+export type * from './generated/pipelines-types.js';
+export * from './generated/pipelines-zod.js';
+export { pipelinesJsonSchema } from './generated/pipelines-json-schema.js';
 
 // Validation: the schema plus the annotation rules it carries.
 export type { PipelineValidationError } from './validate.js';

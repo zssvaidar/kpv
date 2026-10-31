@@ -666,6 +666,11 @@ type Pipeline struct {
 	// Language corresponds to the JSON schema field "language".
 	Language Language `json:"language" yaml:"language"`
 
+	// What the user calls the pipeline, shown in the pipeline list. Optional, so a
+	// pipeline written without one stays valid. Creating a pipeline derives its id
+	// from it (#48); the two are not kept in step afterwards.
+	Name *string `json:"name,omitempty,omitzero" yaml:"name,omitempty"`
+
 	// Ordered processing steps between source and destination. Absent and empty both
 	// mean a pipeline that only moves messages from its source to its destination.
 	ProcessingSteps []ProcessingStep `json:"processingSteps,omitempty,omitzero" yaml:"processingSteps,omitempty"`
@@ -702,6 +707,17 @@ func (j *Pipeline) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Name != nil {
+		if matched, _ := regexp.MatchString(`\S`, string(*plain.Name)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "Name", `\S`)
+		}
+	}
+	if plain.Name != nil && utf8.RuneCountInString(string(*plain.Name)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "name", 1)
+	}
+	if plain.Name != nil && utf8.RuneCountInString(string(*plain.Name)) > 256 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 256)
 	}
 	*j = Pipeline(plain)
 	return nil

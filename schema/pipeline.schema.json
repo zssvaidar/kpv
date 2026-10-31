@@ -16,6 +16,13 @@
     "id": {
       "$ref": "#/$defs/identifier"
     },
+    "name": {
+      "description": "What the user calls the pipeline, shown in the pipeline list. Optional, so a pipeline written without one stays valid. Creating a pipeline derives its id from it (#48); the two are not kept in step afterwards.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "\\S"
+    },
     "language": {
       "$ref": "#/$defs/language"
     },

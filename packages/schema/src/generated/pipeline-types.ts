@@ -39,6 +39,10 @@ export type MessageFormat1 = 'json' | 'text';
  */
 export interface Pipeline {
   id: Identifier;
+  /**
+   * What the user calls the pipeline, shown in the pipeline list. Optional, so a pipeline written without one stays valid. Creating a pipeline derives its id from it (#48); the two are not kept in step afterwards.
+   */
+  name?: string;
   language: Language;
   source: KafkaSourceBlock;
   /**

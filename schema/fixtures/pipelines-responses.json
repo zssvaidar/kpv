@@ -1,0 +1,493 @@
+{
+  "$comment": "The one set of pipeline endpoint fixtures (#48). Both toolchains read this file: agent/internal/httpapi/pipelines_fixtures_test.go and packages/schema/src/pipelines-fixtures.test.ts. Never copy it per language. lists are PipelineList answers (GET /api/pipelines), documents are PipelineDocument answers (GET /api/pipelines/open and POST /api/pipelines), requests are CreatePipelineRequest bodies (POST), errors are PipelinesError answers; each side checks them against the authoritative JSON Schema and against what it was generated into. The packages/web component tests render every valid list and error here.",
+  "lists": {
+    "valid": [
+      {
+        "name": "every-state",
+        "why": "An available root with a readable pipeline, one that fails to parse, one that fails the schema, one of every file problem, and two pipelines sharing an id; a root that is itself a pipeline; a truncated root that skipped links; an unavailable root.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": [
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "billing",
+                  "readable": true,
+                  "id": "orders-to-billing",
+                  "name": "Orders to billing",
+                  "language": "python",
+                  "modified": "2026-10-30T12:00:00Z",
+                  "duplicateId": [
+                    { "root": "/home/user/code/other", "directory": "copy" }
+                  ]
+                },
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "broken-yaml",
+                  "readable": false,
+                  "modified": "2026-10-30T12:01:00Z",
+                  "unreadable": {
+                    "kind": "parse",
+                    "problems": [
+                      {
+                        "pointer": "",
+                        "line": 3,
+                        "message": "the file is not well-formed YAML: yaml: line 3: did not find expected key"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "hand-edited",
+                  "readable": false,
+                  "modified": "2026-10-30T12:02:00Z",
+                  "unreadable": {
+                    "kind": "schema",
+                    "problems": [
+                      {
+                        "pointer": "/processingSteps/0/configuration",
+                        "line": 12,
+                        "column": 7,
+                        "message": "missing property 'onInvalid'"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "huge",
+                  "readable": false,
+                  "modified": "2026-10-30T12:03:00Z",
+                  "unreadable": { "kind": "tooLarge", "problems": [] }
+                },
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "linked",
+                  "readable": false,
+                  "unreadable": { "kind": "link", "problems": [] }
+                },
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "not-a-file",
+                  "readable": false,
+                  "unreadable": { "kind": "notRegularFile", "problems": [] }
+                },
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "private",
+                  "readable": false,
+                  "unreadable": { "kind": "unreadable", "problems": [] }
+                }
+              ]
+            },
+            {
+              "path": "/home/user/code/other",
+              "available": true,
+              "truncated": true,
+              "skippedLinks": 2,
+              "pipelines": [
+                {
+                  "root": "/home/user/code/other",
+                  "directory": "copy",
+                  "readable": true,
+                  "id": "Orders-To-Billing",
+                  "language": "go",
+                  "modified": "2026-10-29T08:00:00Z",
+                  "duplicateId": [
+                    { "root": "/home/user/code/app", "directory": "billing" }
+                  ]
+                }
+              ]
+            },
+            {
+              "path": "/home/user/code/single",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": [
+                {
+                  "root": "/home/user/code/single",
+                  "readable": true,
+                  "id": "single",
+                  "language": "typescript",
+                  "modified": "2026-10-28T08:00:00Z"
+                }
+              ]
+            },
+            {
+              "path": "/home/user/code/gone",
+              "available": false,
+              "reason": "notFound",
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "an-empty-root",
+        "why": "An authorized root with no pipeline in it yet.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "no-roots",
+        "why": "Nothing authorized yet, so there is nothing to list.",
+        "body": { "roots": [] }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "root-without-pipelines",
+        "why": "Every root says what is in it, even when that is nothing.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": 0
+            }
+          ]
+        }
+      },
+      {
+        "name": "unknown-reason",
+        "why": "The reasons are the closed set the roots endpoints use.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": false,
+              "reason": "deleted",
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "unknown-unreadable-kind",
+        "why": "The ways a pipeline.yaml can fail to load are a closed set.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": [
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "x",
+                  "readable": false,
+                  "unreadable": { "kind": "corrupt", "problems": [] }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "an-absolute-path-beside-the-entry",
+        "why": "An entry is its root and directory; nothing else carries a path.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": [
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "x",
+                  "readable": true,
+                  "id": "x",
+                  "language": "go",
+                  "path": "/home/user/code/app/x/pipeline.yaml"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "empty-directory-name",
+        "why": "A root that is itself the pipeline has no directory, never an empty one.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": 0,
+              "pipelines": [
+                {
+                  "root": "/home/user/code/app",
+                  "directory": "",
+                  "readable": true,
+                  "id": "x",
+                  "language": "go"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "negative-skipped-links",
+        "why": "A count is never negative.",
+        "body": {
+          "roots": [
+            {
+              "path": "/home/user/code/app",
+              "available": true,
+              "truncated": false,
+              "skippedLinks": -1,
+              "pipelines": []
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "documents": {
+    "valid": [
+      {
+        "name": "an-opened-pipeline",
+        "why": "The pipeline as a JSON document and the SHA-256 of the bytes it came from.",
+        "body": {
+          "root": "/home/user/code/app",
+          "directory": "billing",
+          "pipeline": {
+            "id": "orders-to-billing",
+            "name": "Orders to billing",
+            "language": "python",
+            "source": {
+              "id": "source",
+              "type": "kafkaSource",
+              "topic": "orders.v1"
+            },
+            "destination": {
+              "id": "destination",
+              "type": "kafkaDestination",
+              "topic": "billing.v1"
+            },
+            "runtimeConfiguration": { "networkMode": "docker" }
+          },
+          "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        }
+      },
+      {
+        "name": "a-root-that-is-the-pipeline",
+        "why": "A root holding pipeline.yaml itself is opened with no directory.",
+        "body": {
+          "root": "/home/user/code/single",
+          "pipeline": {
+            "id": "single",
+            "language": "go",
+            "source": { "id": "in", "type": "kafkaSource", "topic": "in" },
+            "destination": {
+              "id": "out",
+              "type": "kafkaDestination",
+              "topic": "out"
+            },
+            "runtimeConfiguration": { "networkMode": "host" }
+          },
+          "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "uppercase-hash",
+        "why": "The hash is lowercase hex, so two of the same bytes compare equal as strings.",
+        "body": {
+          "root": "/home/user/code/app",
+          "directory": "billing",
+          "pipeline": {},
+          "sha256": "9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08"
+        }
+      },
+      {
+        "name": "no-pipeline",
+        "why": "An opened pipeline always carries the document.",
+        "body": {
+          "root": "/home/user/code/app",
+          "directory": "billing",
+          "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        }
+      }
+    ]
+  },
+  "requests": {
+    "valid": [
+      {
+        "name": "a-create",
+        "why": "Every field a create needs, once.",
+        "body": {
+          "root": "/home/user/code/app",
+          "name": "Orders to billing",
+          "language": "python",
+          "sourceTopic": "orders.v1",
+          "destinationTopic": "billing.v1",
+          "networkMode": "docker"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-network-mode",
+        "why": "The network mode is required and has no default: it is not something to guess.",
+        "body": {
+          "root": "/home/user/code/app",
+          "name": "Orders to billing",
+          "language": "python",
+          "sourceTopic": "orders.v1",
+          "destinationTopic": "billing.v1"
+        }
+      },
+      {
+        "name": "a-path-instead-of-a-root",
+        "why": "The page names a listed root and never builds a path.",
+        "body": {
+          "root": "/home/user/code/app",
+          "path": "/home/user/code/app/orders",
+          "name": "Orders to billing",
+          "language": "python",
+          "sourceTopic": "orders.v1",
+          "destinationTopic": "billing.v1",
+          "networkMode": "docker"
+        }
+      }
+    ]
+  },
+  "errors": {
+    "valid": [
+      {
+        "name": "invalid",
+        "why": "A request that is not well formed.",
+        "body": { "error": "invalid", "message": "the request is not valid" }
+      },
+      {
+        "name": "invalid-fields",
+        "why": "A create whose fields fail the pipeline schema, with where.",
+        "body": {
+          "error": "invalid",
+          "message": "the pipeline would not be valid",
+          "problems": [
+            {
+              "pointer": "/source/topic",
+              "message": "does not match pattern"
+            }
+          ]
+        }
+      },
+      {
+        "name": "not-authorized",
+        "why": "A root that is not, or no longer, authorized.",
+        "body": {
+          "error": "notAuthorized",
+          "message": "this is not an authorized project directory"
+        }
+      },
+      {
+        "name": "root-unavailable",
+        "why": "A stored root that is unavailable, with why.",
+        "body": {
+          "error": "rootUnavailable",
+          "message": "this project directory is unavailable",
+          "reason": "changed"
+        }
+      },
+      {
+        "name": "not-found",
+        "why": "No pipeline at that root and directory.",
+        "body": { "error": "notFound", "message": "there is no pipeline here" }
+      },
+      {
+        "name": "unreadable",
+        "why": "A pipeline.yaml that is there and did not load, with its problems.",
+        "body": {
+          "error": "unreadable",
+          "message": "this pipeline did not load",
+          "unreadable": {
+            "kind": "schema",
+            "problems": [
+              {
+                "pointer": "/runtimeConfiguration",
+                "line": 9,
+                "column": 3,
+                "message": "missing property 'networkMode'"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "root-is-pipeline",
+        "why": "A create into a root that is itself a pipeline.",
+        "body": {
+          "error": "rootIsPipeline",
+          "message": "this project directory is itself a pipeline"
+        }
+      },
+      {
+        "name": "changed",
+        "why": "The new directory was swapped before anything was written into it.",
+        "body": {
+          "error": "changed",
+          "message": "the new directory changed before it was written into",
+          "directoryLeftBehind": true
+        }
+      },
+      {
+        "name": "no-free-id",
+        "why": "Every id derived from the name is taken.",
+        "body": { "error": "noFreeId", "message": "every id is taken" }
+      },
+      {
+        "name": "io",
+        "why": "Anything else, saying whether the new directory is left behind.",
+        "body": {
+          "error": "io",
+          "message": "the pipeline could not be written",
+          "directoryLeftBehind": false
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "unknown-kind",
+        "why": "The kinds are a closed set.",
+        "body": { "error": "gone", "message": "gone" }
+      },
+      {
+        "name": "a-cause",
+        "why": "Nothing from the underlying error rides along.",
+        "body": {
+          "error": "io",
+          "message": "the pipeline could not be written",
+          "cause": "open /home/user/code/app/x: permission denied"
+        }
+      }
+    ]
+  }
+}

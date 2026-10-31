@@ -6,12 +6,13 @@ Zod schemas and raw schema into `packages/schema/src/generated/<prefix>-*.ts`,
 and Go structs plus a copy of the schema into the Go package. Adding a schema
 is a row in that script's `schemas` table.
 
-| Schema                  | Go output (plus the schema copy beside it)   | Shared fixtures                     | Fixture tests                                                       |
-| ----------------------- | -------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------- |
-| `pipeline.schema.json`  | `agent/internal/pipeline/models_gen.go`      | `fixtures/pipelines.json`           | `packages/schema/src/fixtures.test.ts`, `pipeline/fixtures_test.go` |
-| `channel.schema.json`   | `agent/internal/channel/models_gen.go`       | `fixtures/channel-messages.json`    | `channel-fixtures.test.ts`, `channel/fixtures_test.go`              |
-| `directory.schema.json` | `agent/internal/httpapi/models_gen.go`       | `fixtures/directory-responses.json` | `directory-fixtures.test.ts`, `httpapi/directory_fixtures_test.go`  |
-| `roots.schema.json`     | `agent/internal/httpapi/roots_models_gen.go` | `fixtures/roots-responses.json`     | `roots-fixtures.test.ts`, `httpapi/roots_fixtures_test.go`          |
+| Schema                  | Go output (plus the schema copy beside it)       | Shared fixtures                     | Fixture tests                                                       |
+| ----------------------- | ------------------------------------------------ | ----------------------------------- | ------------------------------------------------------------------- |
+| `pipeline.schema.json`  | `agent/internal/pipeline/models_gen.go`          | `fixtures/pipelines.json`           | `packages/schema/src/fixtures.test.ts`, `pipeline/fixtures_test.go` |
+| `channel.schema.json`   | `agent/internal/channel/models_gen.go`           | `fixtures/channel-messages.json`    | `channel-fixtures.test.ts`, `channel/fixtures_test.go`              |
+| `directory.schema.json` | `agent/internal/httpapi/models_gen.go`           | `fixtures/directory-responses.json` | `directory-fixtures.test.ts`, `httpapi/directory_fixtures_test.go`  |
+| `roots.schema.json`     | `agent/internal/httpapi/roots_models_gen.go`     | `fixtures/roots-responses.json`     | `roots-fixtures.test.ts`, `httpapi/roots_fixtures_test.go`          |
+| `pipelines.schema.json` | `agent/internal/httpapi/pipelines_models_gen.go` | `fixtures/pipelines-responses.json` | `pipelines-fixtures.test.ts`, `httpapi/pipelines_fixtures_test.go`  |
 
 The generators are pinned: `go-jsonschema` as a `tool` directive in
 `agent/go.mod`, `json-schema-to-typescript` and `json-schema-to-zod` as root
@@ -35,6 +36,15 @@ What a schema change can break without the change looking wrong
   a root has a `reason` exactly when it is unavailable, and an error names a
   `root` exactly when it is `overlaps` (`roots-fixtures.test.ts`,
   `httpapi/roots_fixtures_test.go`, `httpapi/roots_test.go`)
+- `pipelines.schema.json` `$defs/pipelineRootReason` copies `roots.schema.json`
+  `$defs/rootUnavailableReason`, so the pipeline list says an unavailable root
+  in the picker's words; generation fails when they differ. Its open answer's
+  `pipeline` is a plain object, because a `$ref` cannot reach
+  `pipeline.schema.json`: the page parses it with the generated pipeline Zod.
+  The pairings its descriptions state (a `reason` exactly when unavailable or
+  `rootUnavailable`, `id` and `language` exactly when readable, `unreadable`
+  exactly when not) are held by `pipelines-fixtures.test.ts` and
+  `httpapi/pipelines_fixtures_test.go`
 - The channel envelope is its own schema because it carries a pipeline id and
   is not a pipeline, and `internal/channel` may not import `internal/pipeline`
   (`agent/CLAUDE.md`)

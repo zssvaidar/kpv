@@ -170,6 +170,26 @@
         },
         "runtimeConfiguration": { "networkMode": "docker" }
       }
+    },
+    {
+      "name": "with-a-name",
+      "why": "A pipeline may carry the name the user gave it, in any script and with spaces; the id stays the stable identifier.",
+      "pipeline": {
+        "id": "orders-to-billing",
+        "name": "Orders → billing (EU)",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
     }
   ],
   "invalid": [
@@ -659,6 +679,58 @@
           "networkMode": "docker",
           "environmentVariableNames": ["kafka_password=hunter2"]
         }
+      }
+    },
+    {
+      "name": "empty-name",
+      "why": "A name that is there has something in it; leaving the name out is how a pipeline has none.",
+      "errors": [
+        {
+          "instanceLocation": "/name",
+          "keywordLocation": "/properties/name/minLength"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "name": "",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
+      }
+    },
+    {
+      "name": "blank-name",
+      "why": "A name of nothing but spaces would list as a blank line.",
+      "errors": [
+        {
+          "instanceLocation": "/name",
+          "keywordLocation": "/properties/name/pattern"
+        }
+      ],
+      "pipeline": {
+        "id": "orders-to-billing",
+        "name": "   ",
+        "language": "python",
+        "source": {
+          "id": "orders",
+          "type": "kafkaSource",
+          "topic": "orders.v1"
+        },
+        "destination": {
+          "id": "billing",
+          "type": "kafkaDestination",
+          "topic": "billing.v1"
+        },
+        "runtimeConfiguration": { "networkMode": "docker" }
       }
     }
   ]

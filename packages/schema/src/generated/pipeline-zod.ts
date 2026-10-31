@@ -305,6 +305,15 @@ export const runtimeConfigurationSchema = z
 export const pipelineSchema = z
   .object({
     id: identifierSchema,
+    name: z
+      .string()
+      .regex(new RegExp('\\S'))
+      .min(1)
+      .max(256)
+      .describe(
+        'What the user calls the pipeline, shown in the pipeline list. Optional, so a pipeline written without one stays valid. Creating a pipeline derives its id from it (#48); the two are not kept in step afterwards.',
+      )
+      .optional(),
     language: languageSchema,
     source: kafkaSourceBlockSchema,
     processingSteps: z

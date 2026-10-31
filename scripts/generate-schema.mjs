@@ -6,7 +6,7 @@
 // it, and `pnpm run generate:check` (which CI runs) regenerates and fails when
 // the committed output differs, which is also what catches a hand-edit.
 //
-// There are four schemas, and they are separate files because they describe
+// There are five schemas, and they are separate files because they describe
 // separate things:
 //   - schema/pipeline.schema.json   the pipeline model
 //   - schema/channel.schema.json    the envelope the agent pushes over the
@@ -17,6 +17,10 @@
 //   - schema/roots.schema.json      what the project root endpoints take and
 //                                   answer (#63): the root list, a request,
 //                                   an authorized root or an error
+//   - schema/pipelines.schema.json  what the pipeline endpoints take and
+//                                   answer (#48): the pipeline list, an
+//                                   opened pipeline, a create request or an
+//                                   error
 // Each one generates the same four artifacts: TypeScript types, Zod schemas,
 // the raw schema as a module, and Go structs plus a copy of the schema the Go
 // module can embed.
@@ -99,6 +103,19 @@ const schemas = [
     // gets a file of its own beside it.
     goFile: 'roots_models_gen.go',
     // The request, the authorized answer and the error are definitions the
+    // list does not refer to, and a client needs every one of them.
+    unreachableDefinitions: true,
+  },
+  {
+    file: 'pipelines.schema.json',
+    prefix: 'pipelines',
+    rootName: 'PipelineList',
+    rootConst: 'pipelineListSchema',
+    rawConst: 'pipelinesJsonSchema',
+    goPackage: 'httpapi',
+    goDir: join('agent', 'internal', 'httpapi'),
+    goFile: 'pipelines_models_gen.go',
+    // The open answer, the create request and the error are definitions the
     // list does not refer to, and a client needs every one of them.
     unreachableDefinitions: true,
   },
@@ -281,6 +298,32 @@ const assertThePipelineIDPatternMatches = (byFile) => {
   }
 };
 
+/**
+ * The pipeline list reports an unavailable root with the same reasons the
+ * roots endpoints do, so the page can say it in the same words. The two enums
+ * are in separate files for the reason the id pattern is, and this keeps the
+ * copy honest the same way.
+ */
+const assertTheRootReasonsMatch = (byFile) => {
+  const roots = byFile['roots.schema.json']?.$defs?.rootUnavailableReason?.enum;
+  const listed =
+    byFile['pipelines.schema.json']?.$defs?.pipelineRootReason?.enum;
+  if (!Array.isArray(roots) || !Array.isArray(listed)) {
+    throw new Error(
+      'the roots rootUnavailableReason or the pipelines pipelineRootReason enum is gone, so nothing is holding them to the same reasons',
+    );
+  }
+  if (JSON.stringify(roots) !== JSON.stringify(listed)) {
+    throw new Error(
+      [
+        'the pipeline list and the roots endpoints disagree about why a root is unavailable:',
+        `  schema/roots.schema.json     $defs/rootUnavailableReason/enum  ${JSON.stringify(roots)}`,
+        `  schema/pipelines.schema.json $defs/pipelineRootReason/enum     ${JSON.stringify(listed)}`,
+      ].join('\n'),
+    );
+  }
+};
+
 // --- Zod ---------------------------------------------------------------------
 
 const zodModuleFor = (schema, spec) => {
@@ -427,6 +470,7 @@ const main = async () => {
     assertNoDefaultOnRequired(schema, `schema/${spec.file}`);
   }
   assertThePipelineIDPatternMatches(byFile);
+  assertTheRootReasonsMatch(byFile);
 
   for (const { spec, schema, source } of sources) {
     await generate(spec, schema, source);
