@@ -54,6 +54,13 @@ Rules a change can break
   removed one listed in `remove`. A referenced delete or rename shows the
   agent's report and sends `confirm` only when the person asks.
   `client.ts`'s `listConnectionNames` is what #12's select is filled from
+- the Kafka form names a connection only by a `<select>` of the names
+  `panel/connection-names.ts` read last, re-read whenever a Kafka form is
+  shown and after the connection screen's list changes; never free text. A
+  name the block holds that the list lacks is offered as it is, marked
+  dangling (or unchecked before any read), and kept on save: a reference
+  matches exactly, letter case included (`connectionChoices` in
+  `kafka-form.ts`). No connection leaves the key out
 - `src/connection/monitor.ts` holds the connection state the status bar shows.
   The channel WebSocket is the liveness signal; on a drop one request says why,
   and it reconnects with backoff (`backoff.ts`: 250ms doubling to 10s) unless

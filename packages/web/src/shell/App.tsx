@@ -12,7 +12,9 @@
 //
 // The status bar also leads to the Kafka connection screen (#24), which takes
 // the graph area's place until it is closed: connections are their own
-// screen, never part of the block side panel.
+// screen, never part of the block side panel. The Kafka forms name one by
+// a select of the connection names the agent lists (#12), read again each
+// time a Kafka block's form is shown.
 //
 // The connection state is in the status bar on every screen, and when there
 // is no working connection the graph area says why in words, so a dead or
@@ -38,6 +40,10 @@ import { EditControls } from '../graph/EditControls.tsx';
 import { blockForNode, nodeId, placedBlocks } from '../graph/layout.ts';
 import { PipelineGraph } from '../graph/PipelineGraph.tsx';
 import { SelectionSummary } from '../graph/SelectionSummary.tsx';
+import {
+  createConnectionNamesController,
+  type ConnectionNamesController,
+} from '../panel/connection-names.ts';
 import type { KafkaDraft, KafkaRole } from '../panel/kafka-form.ts';
 import { saveDraft } from '../panel/kafka-form.ts';
 import { KafkaBlockForm, UnsavedElsewhere } from '../panel/KafkaBlockForm.tsx';
@@ -101,6 +107,7 @@ export function Shell(props: {
   pipeline?: Pipeline | null;
   pipelines?: PipelinesController;
   connections?: ConnectionsController;
+  connectionNames?: ConnectionNamesController;
   /** Which screen the graph area starts on; the pipelines by default. */
   screen?: 'pipelines' | 'connections';
 }) {
@@ -119,6 +126,20 @@ export function Shell(props: {
     connectionsController.subscribe,
     connectionsController.current,
     connectionsController.current,
+  );
+  const [ownNames] = useState(() =>
+    props.connectionNames === undefined
+      ? createConnectionNamesController(client)
+      : null,
+  );
+  const namesController = props.connectionNames ?? ownNames;
+  if (namesController === null) {
+    throw new Error('the shell has no connection names controller');
+  }
+  const namesState = useSyncExternalStore(
+    namesController.subscribe,
+    namesController.current,
+    namesController.current,
   );
   const [ownController] = useState(() =>
     props.pipelines === undefined ? createPipelinesController(client) : null,
@@ -139,6 +160,9 @@ export function Shell(props: {
   useEffect(() => {
     connectionsController.setOnline(connectedNow);
   }, [connectionsController, connectedNow]);
+  useEffect(() => {
+    namesController.setOnline(connectedNow);
+  }, [namesController, connectedNow]);
   const opened = props.pipeline ?? listed.opened?.pipeline ?? null;
   // The pipeline as edited, the selected node, why the last edit was refused
   // and the Kafka forms' unsaved input, owned here so the side panel can read
@@ -232,6 +256,14 @@ export function Shell(props: {
   // The Kafka block the selection is, if it is one.
   const kafkaRole: KafkaRole | null =
     selected === 'source' || selected === 'destination' ? selected : null;
+  // Whenever a Kafka form is shown, and whenever the connection screen has
+  // read its list again (after each change it makes), the select offers the
+  // names as they are now.
+  const kafkaFormShown = kafkaRole !== null && current !== null;
+  const connectionList = connectionsState.list;
+  useEffect(() => {
+    if (kafkaFormShown) namesController.refresh();
+  }, [namesController, kafkaFormShown, kafkaRole, screen, connectionList]);
   const kafkaDraft = (role: KafkaRole): KafkaDraft | null => {
     const draft = current?.drafts[role];
     return draft !== undefined && 'role' in draft ? draft : null;
@@ -357,6 +389,10 @@ export function Shell(props: {
                 draft={kafkaDraft(kafkaRole)}
                 onDraft={onDraft}
                 onSave={onSave}
+                connections={namesState}
+                onReloadConnections={() => {
+                  namesController.refresh();
+                }}
               />
             ) : null}
             {connected && stepId !== null && current !== null ? (

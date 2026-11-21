@@ -10,6 +10,7 @@ import type { DestinationDraft, SourceDraft } from './kafka-form.ts';
 import {
   blockFromDraft,
   checkDraft,
+  connectionChoices,
   draftFor,
   isDirty,
   kafkaChoices,
@@ -45,6 +46,7 @@ describe('the form as it starts', () => {
       topic: 'orders.v1',
       consumerGroupId: 'kpv-orders-enriched',
       autoOffsetReset: 'earliest',
+      connection: '',
     });
     expect(isDirty(pipeline, draftFor(pipeline, 'source'))).toBe(false);
   });
@@ -55,6 +57,7 @@ describe('the form as it starts', () => {
       role: 'destination',
       topic: 'billing.v1',
       acks: 'all',
+      connection: '',
     });
   });
 
@@ -236,7 +239,7 @@ describe('the form modules', () => {
 });
 
 // #24: a Kafka block may name a connection, and the form keeps that name
-// when another field is saved, until #12 gives it a select of its own.
+// when another field is saved.
 describe('a block that names a connection', () => {
   it('keeps the connection when another field is saved', () => {
     const pipeline = everyType();
@@ -272,5 +275,160 @@ describe('a block that names a connection', () => {
       sourceDraft(pipeline, { topic: 'orders.v2' }),
     );
     expect(saved.ok && 'connection' in saved.pipeline.source).toBe(false);
+  });
+});
+
+// #12: the connection select, filled from the names #24's agent lists.
+describe('choosing a connection', () => {
+  const named = (): Pipeline => {
+    const pipeline = everyType();
+    pipeline.source = { ...pipeline.source, connection: 'eu-cluster' };
+    pipeline.destination = { ...pipeline.destination, connection: 'billing' };
+    return pipeline;
+  };
+
+  it('starts from the connection the block names', () => {
+    const pipeline = named();
+    expect(draftFor(pipeline, 'source')).toMatchObject({
+      connection: 'eu-cluster',
+    });
+    expect(draftFor(pipeline, 'destination')).toMatchObject({
+      connection: 'billing',
+    });
+  });
+
+  it('saves the chosen name to the block, through updateKafkaBlock', () => {
+    const pipeline = everyType();
+    const draft = sourceDraft(pipeline, { connection: 'eu-cluster' });
+    expect(isDirty(pipeline, draft)).toBe(true);
+    expect(checkDraft(pipeline, draft).valid).toBe(true);
+    const source = saveDraft(pipeline, draft);
+    expect(source.ok).toBe(true);
+    if (!source.ok) return;
+    expect(source.pipeline.source.connection).toBe('eu-cluster');
+    expect('connection' in source.pipeline.destination).toBe(false);
+    // The pipeline it was given is not changed.
+    expect('connection' in pipeline.source).toBe(false);
+
+    const destination = saveDraft(
+      source.pipeline,
+      destinationDraft(source.pipeline, { connection: 'billing' }),
+    );
+    expect(destination.ok).toBe(true);
+    if (!destination.ok) return;
+    expect(destination.pipeline.destination.connection).toBe('billing');
+    expect(destination.pipeline.source.connection).toBe('eu-cluster');
+    // The same check commit runs accepts it.
+    expect(pipelineZodSchema.safeParse(destination.pipeline).success).toBe(
+      true,
+    );
+  });
+
+  it('saves no connection by leaving the key out, never as an empty string', () => {
+    const pipeline = named();
+    const saved = saveDraft(
+      pipeline,
+      sourceDraft(pipeline, { connection: '' }),
+    );
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect('connection' in saved.pipeline.source).toBe(false);
+    expect(saved.pipeline.destination.connection).toBe('billing');
+    expect(
+      blockFromDraft(pipeline, destinationDraft(pipeline, { connection: '' })),
+    ).not.toHaveProperty('connection');
+  });
+
+  it('puts a name the schema refuses on the connection field', () => {
+    // A select offers only listed or saved names, which the schema accepts;
+    // the check still reports one it does not on the field itself.
+    const pipeline = everyType();
+    const check = checkDraft(
+      pipeline,
+      destinationDraft(pipeline, { connection: '-bad name' }),
+    );
+    expect(check.valid).toBe(false);
+    expect(Object.keys(check.fields)).toEqual(['connection']);
+    expect(check.form).toEqual([]);
+  });
+
+  it('offers every listed name, in the order listed, and no connection', () => {
+    const pipeline = everyType();
+    const draft = draftFor(pipeline, 'source');
+    expect(
+      connectionChoices(pipeline, draft, ['billing', 'eu-cluster']),
+    ).toEqual({
+      options: [
+        { name: 'billing', state: 'defined' },
+        { name: 'eu-cluster', state: 'defined' },
+      ],
+      chosen: null,
+    });
+    expect(connectionChoices(pipeline, draft, [])).toEqual({
+      options: [],
+      chosen: null,
+    });
+  });
+
+  it('marks the chosen name as defined when the agent lists it', () => {
+    const pipeline = named();
+    expect(
+      connectionChoices(pipeline, draftFor(pipeline, 'source'), [
+        'billing',
+        'eu-cluster',
+      ]).chosen,
+    ).toEqual({ name: 'eu-cluster', state: 'defined' });
+  });
+
+  it('offers a saved name the list lacks as dangling, and keeps it on save', () => {
+    const pipeline = named();
+    const names = ['billing'];
+    const draft = draftFor(pipeline, 'source');
+    const choices = connectionChoices(pipeline, draft, names);
+    expect(choices.chosen).toEqual({ name: 'eu-cluster', state: 'dangling' });
+    expect(choices.options).toEqual([
+      { name: 'eu-cluster', state: 'dangling' },
+      { name: 'billing', state: 'defined' },
+    ]);
+    // Neither dirty nor invalid: nothing is dropped or rewritten.
+    expect(isDirty(pipeline, draft)).toBe(false);
+    expect(checkDraft(pipeline, draft).valid).toBe(true);
+    const saved = saveDraft(
+      pipeline,
+      sourceDraft(pipeline, { topic: 'orders.v2' }),
+    );
+    expect(saved.ok && saved.pipeline.source.connection).toBe('eu-cluster');
+  });
+
+  it('still offers the dangling saved name after another is chosen', () => {
+    const pipeline = named();
+    const draft = sourceDraft(pipeline, { connection: 'billing' });
+    const choices = connectionChoices(pipeline, draft, ['billing']);
+    expect(choices.chosen).toEqual({ name: 'billing', state: 'defined' });
+    expect(choices.options.map((choice) => choice.name)).toEqual([
+      'eu-cluster',
+      'billing',
+    ]);
+  });
+
+  it('matches a name exactly, so one differing only in case is dangling', () => {
+    const pipeline = named();
+    expect(
+      connectionChoices(pipeline, draftFor(pipeline, 'source'), ['EU-Cluster'])
+        .chosen,
+    ).toEqual({ name: 'eu-cluster', state: 'dangling' });
+  });
+
+  it('calls a name unchecked, not dangling, before any list is read', () => {
+    const pipeline = named();
+    const choices = connectionChoices(
+      pipeline,
+      draftFor(pipeline, 'destination'),
+      null,
+    );
+    expect(choices).toEqual({
+      options: [{ name: 'billing', state: 'unchecked' }],
+      chosen: { name: 'billing', state: 'unchecked' },
+    });
   });
 });

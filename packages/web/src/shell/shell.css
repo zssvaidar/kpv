@@ -313,6 +313,17 @@ body,
   content: 'Error: ';
 }
 
+/* A dangling connection name: kept and savable, so a warning, not an error. */
+.field-warning {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.field-warning::before {
+  content: 'Warning: ';
+}
+
 .field-hint {
   margin: 0.25rem 0 0;
   font-size: 0.8rem;

@@ -41,6 +41,8 @@ export interface SourceDraft {
   topic: string;
   consumerGroupId: string;
   autoOffsetReset: string;
+  /** The named Kafka connection the block uses, or blank for none. */
+  connection: string;
 }
 
 /** What the destination form holds, the same way. */
@@ -48,14 +50,16 @@ export interface DestinationDraft {
   role: 'destination';
   topic: string;
   acks: string;
+  /** The named Kafka connection the block uses, or blank for none. */
+  connection: string;
 }
 
 export type KafkaDraft = SourceDraft | DestinationDraft;
 
 /** The fields a form has, by role, in the order it shows them. */
 export const kafkaFields = {
-  source: ['topic', 'consumerGroupId', 'autoOffsetReset'],
-  destination: ['topic', 'acks'],
+  source: ['topic', 'consumerGroupId', 'autoOffsetReset', 'connection'],
+  destination: ['topic', 'acks', 'connection'],
 } as const;
 
 export type SourceField = (typeof kafkaFields.source)[number];
@@ -86,7 +90,7 @@ export const fieldDescription = {
     kafkaSourceBlockSchema.shape.consumerGroupId.unwrap().description ?? '',
   autoOffsetReset: offsetReset.unwrap().description ?? '',
   acks: acks.unwrap().description ?? '',
-} satisfies Record<KafkaField, string>;
+} satisfies Record<Exclude<KafkaField, 'connection'>, string>;
 
 /** The block a role names in this pipeline. */
 export const kafkaBlock = (
@@ -104,10 +108,16 @@ export function draftFor(pipeline: Pipeline, role: KafkaRole): KafkaDraft {
       topic: block.topic,
       consumerGroupId: block.consumerGroupId ?? '',
       autoOffsetReset: block.autoOffsetReset ?? '',
+      connection: block.connection ?? '',
     };
   }
   const block = pipeline.destination;
-  return { role, topic: block.topic, acks: block.acks ?? '' };
+  return {
+    role,
+    topic: block.topic,
+    acks: block.acks ?? '',
+    connection: block.connection ?? '',
+  };
 }
 
 /** Whether the form holds anything the pipeline does not. */
@@ -140,6 +150,7 @@ export function blockFromDraft(
     const block: KafkaSourceBlock = { ...pipeline.source, topic: draft.topic };
     setOrOmit(block, 'consumerGroupId', draft.consumerGroupId);
     setOrOmit(block, 'autoOffsetReset', draft.autoOffsetReset);
+    setOrOmit(block, 'connection', draft.connection);
     return block;
   }
   const block: KafkaDestinationBlock = {
@@ -147,7 +158,64 @@ export function blockFromDraft(
     topic: draft.topic,
   };
   setOrOmit(block, 'acks', draft.acks);
+  setOrOmit(block, 'connection', draft.connection);
   return block;
+}
+
+/**
+ * One choice the connection select offers. A name the agent listed is
+ * `defined`. A name the block holds, saved or chosen, that the list does not
+ * have is `dangling`: it names no connection now, and it is offered as it is
+ * so that nothing drops or rewrites it. While no list has been read, such a
+ * name is `unchecked`, since whether it exists is not known.
+ */
+export interface ConnectionChoice {
+  name: string;
+  state: 'defined' | 'dangling' | 'unchecked';
+}
+
+/** What the connection select offers for this form, and what it says. */
+export interface ConnectionChoices {
+  /** Every name to offer, besides choosing no connection. */
+  options: ConnectionChoice[];
+  /** The chosen name's choice, or `null` for no connection. */
+  chosen: ConnectionChoice | null;
+}
+
+/**
+ * The connection select's choices: every name the agent listed, as it
+ * listed them, after the block's saved name and the typed one when the list
+ * lacks them. A reference matches a name exactly, letter case included, as
+ * it does in pipeline.yaml, so a name differing only in case is dangling.
+ * `names` is `null` while no list has been read.
+ */
+export function connectionChoices(
+  pipeline: Pipeline,
+  draft: KafkaDraft,
+  names: readonly string[] | null,
+): ConnectionChoices {
+  const listed = new Set(names ?? []);
+  const held: ConnectionChoice[] = [];
+  for (const name of [
+    kafkaBlock(pipeline, draft.role).connection ?? '',
+    draft.connection,
+  ]) {
+    if (name === '' || listed.has(name) || held.some((c) => c.name === name)) {
+      continue;
+    }
+    held.push({ name, state: names === null ? 'unchecked' : 'dangling' });
+  }
+  const options = [
+    ...held,
+    ...(names ?? []).map((name): ConnectionChoice => ({
+      name,
+      state: 'defined',
+    })),
+  ];
+  return {
+    options,
+    chosen: options.find((choice) => choice.name === draft.connection) ?? null,
+  };
 }
 
 /** What the schema says about the form, worded for the field it is about. */
