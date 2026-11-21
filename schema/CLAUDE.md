@@ -4,7 +4,10 @@ Each schema here is the single source of truth for its shape.
 `scripts/generate-schema.mjs` (`pnpm generate`) writes the TypeScript types,
 Zod schemas and raw schema into `packages/schema/src/generated/<prefix>-*.ts`,
 and Go structs plus a copy of the schema into the Go package. Adding a schema
-is a row in that script's `schemas` table.
+is a row in that script's `schemas` table, plus the schema and every file the
+row writes in `generatedPaths` in `scripts/check-generated.mjs`. Nothing fails
+when that second list is short: `generate:check` simply stops covering the
+new outputs (missed in #48, added in #24).
 
 | Schema                   | Go output (plus the schema copy beside it)                                                            | Shared fixtures                     | Fixture tests                                                                                         |
 | ------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -27,7 +30,14 @@ What a schema change can break without the change looking wrong
   (`generate-schema.mjs`)
 - A required property may not carry a `default`: the generated Zod would make
   it optional and disagree with a JSON Schema validator. Generation refuses it
-  (`generate-schema.mjs`)
+  (`generate-schema.mjs`). So a required property has no default to show or
+  promise; the value a newly inserted block starts with is the web's
+  `newStepConfiguration` (`packages/web/src/graph/edit.ts`), not a schema
+  default (#13 failed QA on that wording)
+- Every `$defs` name becomes a type and a `<name>Schema` Zod constant that
+  `packages/schema/src/index.ts` re-exports with `export type *` and
+  `export *`, so a name used in two schemas collides. `pnpm typecheck` fails with TS2308; give the second
+  one its own name (#24 chose `kafkaConnectionName`)
 - `x-kpv-uniqueBy` (step ids unique within a pipeline) is not JSON Schema, so
   it is implemented twice: `agent/internal/pipeline/validate.go` and
   `packages/schema/src/unique-by.ts`. A new `x-kpv-*` keyword needs both, and

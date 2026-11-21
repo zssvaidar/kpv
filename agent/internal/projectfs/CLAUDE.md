@@ -20,10 +20,24 @@ leaves a root.
 - `Path.Pin` (`pin.go`, `pin_test.go`) holds a directory open by its own
   descriptor, walked one name at a time without following links (a link or a
   swap is `changed`); Paths from it keep reaching that directory when it is
-  renamed or replaced, and stop with `forbidden` on revoke or `Close`
+  renamed or replaced, and stop with `forbidden` on revoke or `Close`.
+  `changed` also covers a directory that opens but cannot be searched (read
+  without execute: its `Stat(".")` fails); a caller that must tell that from
+  a swap `Lstat`s the name again, as `internal/catalog`'s list and open do
+  (#48, `TestADirectoryThatCannotBeSearchedOpensUnreadableAsTheListShowsIt`)
+- a Path that is not from a pin walks its name again on every operation
+  (`pin.go`'s `PinnedDir` comment). `Resolve` follows a link already on the
+  given path, and an ancestor swapped for a link after `Resolve` redirects a
+  relative-target link and makes an absolute-target one `forbidden`. A caller
+  that needs `changed` for every link or swap compares the given path with
+  `Real()` and makes `Pin` its first disk operation after `Resolve`
+  (`internal/secrets/files.go`, `TestALinkInThePipelinePathIsRefusedChanged`;
+  #16 and #23 each failed QA on this)
 - a directory swapped between the check and the open is refused as `changed`,
   never followed (`os.SameFile`; `toctou_test.go`,
-  `TestADirectorySwappedBetweenTheCheckAndTheOpenIsRefused`)
+  `TestADirectorySwappedBetweenTheCheckAndTheOpenIsRefused`), and so is a link
+  that changes between `Resolve`'s `Lstat` and `Readlink`
+  (`TestALinkThatChangesBeforeItIsReadIsRefusedAsChanged`)
 
 Project roots (`roots.go`, `store.go`, tests in `roots_test.go`, `gone_test.go`)
 

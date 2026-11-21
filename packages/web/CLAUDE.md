@@ -75,3 +75,9 @@ Development (`pnpm dev`, `dev/`)
 - `/graph-preview.html?fixture=<name>` and `/blocks-preview.html` draw
   checked-in fixtures in the dev server with no agent (`src/preview/`); a
   build leaves them out
+- tests have no DOM, so a check in a real browser is by hand: headless
+  Google Chrome is at `/usr/bin/google-chrome`, driven over CDP by
+  `playwright-core` or `puppeteer-core` installed in a scratch directory. No
+  browser driver is a dependency of the workspace (`package.json`,
+  `pnpm-lock.yaml`), and adding one is not part of a check. Where `pnpm dev`
+  keeps its store is in `agent/CLAUDE.md` (Startup lines)

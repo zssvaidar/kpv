@@ -62,5 +62,11 @@ token is written. `packages/web/dev/agent-process.ts` parses the `open` line
 The agent reads the real `HOME` and `os.UserConfigDir()` (the roots store,
 `internal/projectfs/CLAUDE.md`, and the connection store beside it,
 `internal/connections/CLAUDE.md`). `cmd/agent/main_test.go` points `HOME` and
-`XDG_CONFIG_HOME` at scratch directories; `packages/web/dev/dev.test.ts` does
-not, so the agent it starts reads the developer's real store.
+`XDG_CONFIG_HOME` at scratch directories. `pnpm dev` and
+`packages/web/dev/dev.test.ts` start the agent with the environment they were
+given (`spawn` in `packages/web/dev/agent-process.ts`), so unless `HOME` and
+`XDG_CONFIG_HOME` are set to scratch directories they read, and an authorize,
+a connection save or a corrupt store moved aside writes, the developer's real
+`~/.config/kpv/roots.json` and `connections.json`. A root must be strictly
+inside `HOME` (`internal/projectfs/CLAUDE.md`), so a manual check that keeps
+the real `HOME` needs its project directories under `~`.
