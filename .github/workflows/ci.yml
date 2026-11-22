@@ -57,4 +57,10 @@ jobs:
 
       - run: pnpm run test
 
+      # The security boundary suite (#46) runs inside pnpm run test too; a
+      # step of its own names it in the run when it fails.
+      - name: Security boundary suite
+        working-directory: agent
+        run: go test ./cmd/agent -run '^TestSecurity' -count=1 -v
+
       - run: pnpm run build

@@ -101,3 +101,48 @@ a connection save or a corrupt store moved aside writes, the developer's real
 `~/.config/kpv/roots.json` and `connections.json`. A root must be strictly
 inside `HOME` (`internal/projectfs/CLAUDE.md`), so a manual check that keeps
 the real `HOME` needs its project directories under `~`.
+
+## The security boundary suite (#46)
+
+`cmd/agent/security_*_test.go` builds `cmd/agent` and runs the binary as a
+child with scratch `HOME`, `XDG_CONFIG_HOME` (inside that home) and `PATH`,
+reads the token from the `open` line and takes stderr as the log. It attacks
+the agent as a hostile local client: `TestSecurityBoundary` runs every corpus
+against one run, then restarts the binary and searches again. Run it alone
+with `go test ./cmd/agent -run '^TestSecurity' -count=1 -v`. CI also runs it
+as the `Security boundary suite` step.
+
+- what it covers: the token, origin, CSRF, `Sec-Fetch-Site` and DNS
+  rebinding shapes on every route and as channel handshakes, against the
+  uniform `404`. Paths no route registers. One path corpus on every path
+  input, with links, a cycle, a FIFO and a swap planted in a root. Probing
+  outside the roots. The settings directory, `roots.json`, `connections.json`
+  and `workcopies/`. `.env` and `.gitignore`. One body corpus on every
+  body-taking route. The header cap, a slow header and a body that never
+  ends. Injection strings on every string input against recording stand-ins
+  on `PATH`. Canary credentials, the `.env` canary and the token, searched in
+  every answer, channel frame, log line and file. Disk snapshots around each
+  corpus
+- the routes come from `newHandler` in `internal/httpapi/routes.go`
+  (`discoverRoutes`, `security_routes_test.go`), never from a list in the
+  suite. A new route needs a row in `routeTable` with its inputs, cap, path
+  and string inputs and kinds. `TestSecurityTableHasARowForEveryRegisteredRoute`
+  fails, naming the route, until it has one, and also fails on a row for a
+  route no longer registered. The row is all a route needs to get every
+  corpus
+- a case that fails against the shipped controls is filed and skipped with
+  `skipForIssue(t, <issue>, ...)`. `TestSecuritySkipsEachNameAnIssue` fails
+  any other skip. Today: #102 (`Origin: http://localhost:<port>` is
+  accepted), #103 (a path-cleaning redirect keeps `?token=` in `Location`),
+  #104 (a body that never ends, on routes whose cap is under 256 KiB), #105
+  (headers just over 64 KiB are served) and #106 (a create `name` with a NUL
+  or a lone surrogate)
+- the static process scans are #37's (`internal/projectfs/boundary_test.go`,
+  `internal/process/*_test.go`). This suite only checks at run time that no
+  request starts anything. It reads `internal/process/programs.go` for the
+  executables to put on `PATH`, and no other source but `routes.go` and the
+  pattern constants
+- what it does not reach: a `GET` with the token, a foreign `Host` and no
+  `Origin` (#101 decides whether `Host` is checked), and attacks that need
+  write access to the user's files as the user, such as a hard link to
+  `connections.json` planted in a root or a file planted in `workcopies/`

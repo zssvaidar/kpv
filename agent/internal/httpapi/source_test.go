@@ -12,6 +12,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -329,8 +330,22 @@ func TestOnlyNewHandlerBuildsAMuxAndItWrapsIt(t *testing.T) {
 	if newHandler == nil {
 		t.Fatal("newHandler no longer exists, so nothing here is checking how the handler is built")
 	}
-	// Whatever newHandler returns has to be the wrapped handler, never the mux
-	// itself.
+	for _, problem := range newHandlerReturnProblems(t, fileSet, newHandler) {
+		t.Error(problem)
+	}
+}
+
+// wrappedMux is the one expression newHandler may return, compared as
+// written: the mux it built, wrapped in the guard and nothing else. A
+// substring check would pass sideDoor(g.wrap(mux)), which serves a path of
+// its own ahead of the guard (#4's QA, #46).
+const wrappedMux = "g.wrap(mux)"
+
+// newHandlerReturnProblems is every way newHandler's return differs from
+// exactly one return of wrappedMux.
+func newHandlerReturnProblems(t *testing.T, fileSet *token.FileSet, newHandler *ast.FuncDecl) []string {
+	t.Helper()
+	var problems []string
 	returned := 0
 	ast.Inspect(newHandler.Body, func(node ast.Node) bool {
 		statement, ok := node.(*ast.ReturnStmt)
@@ -338,16 +353,42 @@ func TestOnlyNewHandlerBuildsAMuxAndItWrapsIt(t *testing.T) {
 			return true
 		}
 		returned++
-		for _, result := range statement.Results {
-			written := source(t, fileSet, result)
-			if !strings.Contains(written, ".wrap(") {
-				t.Errorf("newHandler returns %q, which is not the guard-wrapped handler", written)
-			}
+		written := ""
+		if len(statement.Results) == 1 {
+			written = source(t, fileSet, statement.Results[0])
+		}
+		if written != wrappedMux {
+			problems = append(problems, fmt.Sprintf("newHandler returns %q, which is not exactly %s", written, wrappedMux))
 		}
 		return true
 	})
 	if returned != 1 {
-		t.Errorf("newHandler has %d return statements, want one, so there is one thing it can hand back", returned)
+		problems = append(problems, fmt.Sprintf("newHandler has %d return statements, want one, so there is one thing it can hand back", returned))
+	}
+	return problems
+}
+
+// The return check against planted newHandlers: the escape #4's QA found,
+// returning sideDoor(g.wrap(mux)), fails it, as do the mux itself and a
+// second return; the real shape passes.
+func TestTheReturnCheckRefusesAPlantedSideDoor(t *testing.T) {
+	t.Parallel()
+	for body, wantProblems := range map[string]bool{
+		"mux := http.NewServeMux()\nreturn g.wrap(mux)":                                false,
+		"mux := http.NewServeMux()\nreturn sideDoor(g.wrap(mux))":                      true,
+		"mux := http.NewServeMux()\nreturn mux":                                        true,
+		"mux := http.NewServeMux()\nreturn g.wrap(other)":                              true,
+		"mux := http.NewServeMux()\nif x {\nreturn g.wrap(mux)\n}\nreturn g.wrap(mux)": true,
+	} {
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, "planted.go", "package httpapi\nfunc newHandler(g *guard, routes []route) http.Handler {\n"+body+"\n}\n", 0)
+		if err != nil {
+			t.Fatalf("parse the planted newHandler: %v", err)
+		}
+		problems := newHandlerReturnProblems(t, fileSet, file.Decls[0].(*ast.FuncDecl))
+		if (len(problems) != 0) != wantProblems {
+			t.Errorf("a newHandler of %q gave problems %v", body, problems)
+		}
 	}
 }
 

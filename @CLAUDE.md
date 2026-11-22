@@ -91,6 +91,9 @@ not it). There, `pnpm exec prettier --check . '!CLAUDE.md'` plus `pnpm lint:ts`
 and `pnpm lint:go` stand in for `pnpm lint`; a clean clone and CI run
 `pnpm lint` as it is.
 - one Go package: `cd agent && go test ./internal/<pkg>/ -run <TestName>`
+- the security boundary suite alone (#46, `agent/CLAUDE.md`):
+  `cd agent && go test ./cmd/agent -run '^TestSecurity' -count=1 -v`. It
+  builds and starts the real agent binary, so it takes about 20 seconds
 
 The Go module is `agent/` (`github.com/zssvaidar/kpv/agent`), so plain `go`
 commands run from there.
