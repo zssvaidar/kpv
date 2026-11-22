@@ -36,14 +36,19 @@ package projectfs
 import (
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
+	"go/importer"
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -540,6 +545,459 @@ var _ = ForTest
 	scan = scanForCommands([]moduleFile{{path: "internal/parser/plant.go", pkg: "internal/parser", file: elsewhere, set: other}})
 	if len(scan.forTestReferencedIn) != 1 {
 		t.Fatalf("an aliased ForTest reference was not seen: %v", scan.forTestReferencedIn)
+	}
+}
+
+// --- round 3: internal/process checked with real types, and the routes to a
+// process that are not os/exec at all ------------------------------------
+
+// processImportAllowlist is every package internal/process's non-test files
+// may import. It is an allowlist, so reflect, unsafe, plugin, cgo's "C" and
+// anything else that could reach around the rules below fail by being
+// absent.
+var processImportAllowlist = map[string]bool{
+	"bytes": true, "context": true, "errors": true, "fmt": true, "os": true,
+	"os/exec": true, "path/filepath": true, "strings": true, "sync": true,
+	"syscall": true, "time": true,
+}
+
+// processObjectAllowlist is every package-level name of os, os/exec and
+// syscall internal/process may use, resolved by the type checker, so no
+// spelling, alias or function value reaches another.
+var processObjectAllowlist = map[string]map[string]bool{
+	"os/exec": {"CommandContext": true, "LookPath": true, "ErrWaitDelay": true, "Cmd": true},
+	"os":      {"Getenv": true, "LookupEnv": true, "ProcessState": true},
+	"syscall": processSyscallNames,
+}
+
+// cmdSelections is every field and method of exec.Cmd internal/process may
+// select. Path, Run, Output, CombinedOutput and the pipes are not on it, so
+// the one command cannot be pointed at another executable or run another
+// way. Args only as Args[...], so the argument list is the program's.
+var cmdSelections = map[string]bool{
+	"Args": true, "Env": true, "Dir": true, "Stdin": true, "Stdout": true, "Stderr": true,
+	"WaitDelay": true, "SysProcAttr": true, "Cancel": true, "Process": true,
+	"ProcessState": true, "Start": true, "Wait": true,
+}
+
+// runnerFunction is the one function in internal/process that may hold a
+// command: the exec.CommandContext call, every *exec.Cmd and every use of
+// exec.Cmd are inside it.
+const runnerFunction = "Run"
+
+// lockedImporter shares one importer between the parallel tests that type
+// check: the packages it answers are complete and never change, but its
+// cache is not safe for concurrent use.
+type lockedImporter struct {
+	mu       sync.Mutex
+	importer types.Importer
+}
+
+func (l *lockedImporter) Import(path string) (*types.Package, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.importer.Import(path)
+}
+
+var sharedImporter = sync.OnceValue(func() types.Importer {
+	return &lockedImporter{importer: importer.Default()}
+})
+
+// buildsHere reports whether a file's //go:build line holds for the
+// platform the test runs on, so the unix and non-unix halves of a package
+// are not type checked together.
+func buildsHere(file *ast.File) bool {
+	for _, group := range file.Comments {
+		for _, comment := range group.List {
+			if !constraint.IsGoBuild(comment.Text) {
+				continue
+			}
+			expression, err := constraint.Parse(comment.Text)
+			if err != nil {
+				return true
+			}
+			return expression.Eval(func(tag string) bool {
+				switch tag {
+				case runtime.GOOS, runtime.GOARCH, runtime.Compiler:
+					return true
+				case "unix":
+					return runtime.GOOS != "windows" && runtime.GOOS != "plan9" && runtime.GOOS != "js" && runtime.GOOS != "wasip1"
+				}
+				return strings.HasPrefix(tag, "go1.")
+			})
+		}
+	}
+	return true
+}
+
+// processTypeViolations type checks internal/process's non-test files for
+// this platform and applies the allowlists above. Every way the type
+// checker can tell an exec.Cmd is made, copied, selected or started is
+// covered here; QA's round-2 bypasses are TestTheTypedProcessScanCatches...
+func processTypeViolations(files []moduleFile) []string {
+	var out []string
+	report := func(file moduleFile, node ast.Node, format string, args ...any) {
+		out = append(out, fmt.Sprintf("%s:%d: %s", file.path, file.set.Position(node.Pos()).Line, fmt.Sprintf(format, args...)))
+	}
+	var checked []moduleFile
+	var syntax []*ast.File
+	for _, file := range files {
+		if buildsHere(file.file) {
+			checked = append(checked, file)
+			syntax = append(syntax, file.file)
+		}
+	}
+	if len(checked) == 0 {
+		return []string{"no file of internal/process builds here, so nothing was type checked"}
+	}
+	info := &types.Info{
+		Types:      map[ast.Expr]types.TypeAndValue{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+		Instances:  map[*ast.Ident]types.Instance{},
+	}
+	config := types.Config{Importer: sharedImporter(), Error: func(err error) {
+		out = append(out, fmt.Sprintf("internal/process does not type check, so nothing in it can be vouched for: %v", err))
+	}}
+	pkg, _ := config.Check("internal/process", checked[0].set, syntax, info)
+	if pkg == nil {
+		return out
+	}
+	var cmd types.Type
+	for _, imported := range pkg.Imports() {
+		if imported.Path() == "os/exec" {
+			cmd = imported.Scope().Lookup("Cmd").Type()
+		}
+	}
+	isCmd := func(t types.Type) bool { return cmd != nil && types.Identical(t, cmd) }
+	isCmdPointer := func(t types.Type) bool {
+		pointer, ok := t.(*types.Pointer)
+		return ok && isCmd(pointer.Elem())
+	}
+
+	commandContextCalls := 0
+	for _, file := range checked {
+		for _, spec := range file.file.Imports {
+			path, _ := strconv.Unquote(spec.Path.Value)
+			if !processImportAllowlist[path] {
+				report(file, spec, "imports %s, which is not on the list internal/process may import", path)
+			}
+		}
+		// The function each node is in, and each node's parent.
+		parents := map[ast.Node]ast.Node{}
+		var stack []ast.Node
+		ast.Inspect(file.file, func(node ast.Node) bool {
+			if node == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			if len(stack) > 0 {
+				parents[node] = stack[len(stack)-1]
+			}
+			stack = append(stack, node)
+			return true
+		})
+		inRunner := func(node ast.Node) bool {
+			for at := node; at != nil; at = parents[at] {
+				if function, ok := at.(*ast.FuncDecl); ok {
+					return function.Recv == nil && function.Name.Name == runnerFunction
+				}
+			}
+			return false
+		}
+
+		ast.Inspect(file.file, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.FuncType:
+				if typed.TypeParams != nil && len(typed.TypeParams.List) > 0 {
+					report(file, typed, "declares type parameters; internal/process has no generics, so no type argument can make an exec.Cmd")
+				}
+			case *ast.TypeSpec:
+				if typed.TypeParams != nil && len(typed.TypeParams.List) > 0 {
+					report(file, typed, "declares a generic type; internal/process has no generics")
+				}
+			case *ast.Ident:
+				if _, instance := info.Instances[typed]; instance {
+					report(file, typed, "instantiates the generic %s; internal/process instantiates none", typed.Name)
+				}
+				object := info.Uses[typed]
+				if object == nil || object.Pkg() == nil || object.Parent() != object.Pkg().Scope() {
+					return true
+				}
+				allowed, guarded := processObjectAllowlist[object.Pkg().Path()]
+				if !guarded {
+					return true
+				}
+				if !allowed[object.Name()] {
+					report(file, typed, "uses %s.%s, which is not on the list internal/process may use", object.Pkg().Path(), object.Name())
+					return true
+				}
+				if object.Pkg().Path() != "os/exec" {
+					return true
+				}
+				switch object.Name() {
+				case "CommandContext":
+					selector, _ := parents[typed].(*ast.SelectorExpr)
+					call, _ := parents[selector].(*ast.CallExpr)
+					if selector == nil || call == nil || call.Fun != selector {
+						report(file, typed, "uses exec.CommandContext other than as the callee of a call; a function value would let it be called from anywhere")
+						return true
+					}
+					commandContextCalls++
+					if !inRunner(call) {
+						report(file, typed, "calls exec.CommandContext outside %s", runnerFunction)
+					}
+				case "Cmd":
+					if !inRunner(typed) {
+						report(file, typed, "names exec.Cmd outside %s", runnerFunction)
+					}
+				}
+			case *ast.SelectorExpr:
+				selection := info.Selections[typed]
+				if selection == nil || selection.Obj().Pkg() == nil || selection.Obj().Pkg().Path() != "os/exec" {
+					return true
+				}
+				name := selection.Obj().Name()
+				if !cmdSelections[name] {
+					report(file, typed, "selects exec.Cmd's %s, which is not on the list internal/process may select", name)
+				}
+				if _, indexed := parents[typed].(*ast.IndexExpr); name == "Args" && !indexed {
+					report(file, typed, "uses exec.Cmd's Args other than as Args[...]; the argument list is the program's")
+				}
+				if !inRunner(typed) {
+					report(file, typed, "selects exec.Cmd's %s outside %s", name, runnerFunction)
+				}
+			case *ast.CallExpr:
+				if ident, ok := typed.Fun.(*ast.Ident); ok && len(typed.Args) == 1 {
+					if builtin, ok := info.Uses[ident].(*types.Builtin); ok && builtin.Name() == "new" && isCmd(info.Types[typed.Args[0]].Type) {
+						report(file, typed, "makes an exec.Cmd with new")
+					}
+				}
+			}
+			if expression, ok := node.(ast.Expr); ok {
+				if value, known := info.Types[expression]; known && value.IsValue() {
+					if isCmd(value.Type) {
+						report(file, expression, "has a value of type exec.Cmd (a literal, a copy or a dereference); the only command is the *exec.Cmd exec.CommandContext answers")
+					}
+					if isCmdPointer(value.Type) && !inRunner(expression) {
+						report(file, expression, "has a *exec.Cmd outside %s", runnerFunction)
+					}
+				}
+			}
+			return true
+		})
+	}
+	if commandContextCalls != 1 {
+		out = append(out, fmt.Sprintf("internal/process calls exec.CommandContext %d times, want exactly once", commandContextCalls))
+	}
+	return out
+}
+
+// importsAnywhere are packages no file of the module may import, test files
+// included: each starts a process without os/exec or syscall in the
+// importing file. "C" is cgo, whose C.system runs a shell; net/http/cgi runs
+// the program its Handler names; plugin loads and runs code.
+var importsAnywhere = map[string]string{
+	"C":            "is cgo, which can call system() or exec*() with no Go call to see",
+	"net/http/cgi": "runs the program its Handler names",
+	"plugin":       "loads and runs code from a file",
+}
+
+// importsOutsideTests are packages no non-test file may import: each runs
+// the go command. Tests may, and this one does, to type check
+// internal/process.
+var importsOutsideTests = map[string]string{
+	"go/build":    "runs the go command",
+	"go/importer": "runs the go command to find export data",
+}
+
+// nonGoSources are the extensions of files the go command compiles or links
+// into a package beside its .go files. None is read by the scans here, so
+// none may exist in the module.
+var nonGoSources = map[string]bool{
+	".s": true, ".S": true, ".sx": true, ".c": true, ".cc": true, ".cxx": true,
+	".cpp": true, ".m": true, ".h": true, ".hh": true, ".hpp": true, ".hxx": true,
+	".f": true, ".F": true, ".for": true, ".f90": true, ".swig": true,
+	".swigcxx": true, ".syso": true,
+}
+
+// moduleWideViolations checks one file of the module, test or not, by its
+// path and, for a .go file, its imports.
+func moduleWideViolations(path string, file *ast.File) []string {
+	var out []string
+	if nonGoSources[filepath.Ext(path)] {
+		out = append(out, fmt.Sprintf("%s is a source the go command builds into a package, and none of the scans here read it", path))
+	}
+	if file == nil {
+		return out
+	}
+	test := strings.HasSuffix(path, "_test.go")
+	for _, spec := range file.Imports {
+		imported, _ := strconv.Unquote(spec.Path.Value)
+		if why, banned := importsAnywhere[imported]; banned {
+			out = append(out, fmt.Sprintf("%s imports %q, which %s", path, imported, why))
+		}
+		if why, banned := importsOutsideTests[imported]; banned && !test {
+			out = append(out, fmt.Sprintf("%s imports %q, which %s", path, imported, why))
+		}
+	}
+	return out
+}
+
+// Nothing in the module reaches a process by a route the scans above cannot
+// see: no cgo, net/http/cgi or plugin in any file, test files included, no
+// go/build or go/importer outside tests, and no non-Go source.
+func TestNoFileInTheModuleReachesAProcessAnotherWay(t *testing.T) {
+	t.Parallel()
+	root := moduleRoot(t)
+	set := token.NewFileSet()
+	seen := 0
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		name := entry.Name()
+		if entry.IsDir() {
+			if path != root && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "testdata") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		relative, _ := filepath.Rel(root, path)
+		relative = filepath.ToSlash(relative)
+		var parsed *ast.File
+		if strings.HasSuffix(name, ".go") {
+			parsed, err = parser.ParseFile(set, path, nil, parser.ImportsOnly)
+			if err != nil {
+				return err
+			}
+			seen++
+		}
+		for _, violation := range moduleWideViolations(relative, parsed) {
+			t.Error(violation)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk the module: %v", err)
+	}
+	if seen < 40 {
+		t.Fatalf("read only %d Go files, test files included; this is looking at the wrong thing", seen)
+	}
+}
+
+// The typed scan of internal/process passes on the shipped code.
+func TestInternalProcessPassesTheTypedScan(t *testing.T) {
+	t.Parallel()
+	var files []moduleFile
+	for _, file := range parseModule(t) {
+		if file.pkg == "internal/process" {
+			files = append(files, file)
+		}
+	}
+	for _, violation := range processTypeViolations(files) {
+		t.Error(violation)
+	}
+}
+
+// Each route QA's round-2 review found, and the others the typed scan is
+// there for, planted next to the shipped files of internal/process (so they
+// type check against Run and Program) and fed to the same scan. The module
+// wide routes are planted as paths and imports.
+func TestTheTypedProcessScanCatchesEveryPlantedRoute(t *testing.T) {
+	t.Parallel()
+	var shipped []moduleFile
+	for _, file := range parseModule(t) {
+		if file.pkg == "internal/process" {
+			shipped = append(shipped, file)
+		}
+	}
+	set := shipped[0].set
+	plants := []struct{ name, source, want string }{
+		{"CommandContext as a function value", `import ("context"; "os/exec")
+var second = exec.CommandContext
+func plantSecond() { _ = second(context.Background(), "/bin/true").Start() }`, "other than as the callee"},
+		{"a second CommandContext call", `import ("context"; "os/exec")
+func plantSecond() { _ = exec.CommandContext(context.Background(), "/bin/true").Start() }`, "exactly once"},
+		{"generic zero value", `import "os/exec"
+func plantZero[P interface{ *E }, E any]() P { return P(new(E)) }
+func plantRun() { c := plantZero[*exec.Cmd](); _ = c.Start() }`, "type parameters"},
+		{"reflect.New", `import ("os/exec"; "reflect")
+func plantRun() { c := reflect.New(reflect.TypeOf((*exec.Cmd)(nil)).Elem()).Interface().(*exec.Cmd); _ = c.Start() }`, "imports reflect"},
+		{"a dereferenced copy", `import "os/exec"
+func plantCopy(c *exec.Cmd) { d := *c; d.Args[0] = "x"; _ = d.Start() }`, "value of type exec.Cmd"},
+		{"a copy inside Run's file", `import "os/exec"
+func plantCopy(c *exec.Cmd) { _ = c.Start() }`, "outside Run"},
+		{"new(exec.Cmd)", `import "os/exec"
+func plantNew() { _ = new(exec.Cmd).Start() }`, "with new"},
+		{"an exec.Cmd literal", `import "os/exec"
+var plant = &exec.Cmd{Path: "/usr/bin/touch"}`, "value of type exec.Cmd"},
+		{"Path selected", `import "os/exec"
+func plantPath(c *exec.Cmd) { c.Path = "/usr/bin/touch" }`, "selects exec.Cmd's Path"},
+		{"Run selected", `import "os/exec"
+func plantPath(c *exec.Cmd) { _ = c.Run() }`, "selects exec.Cmd's Run"},
+		{"Args replaced", `import "os/exec"
+func plantArgs(c *exec.Cmd) { c.Args = []string{"x", "y"} }`, "Args other than as Args"},
+		{"an embedding struct", `import "os/exec"
+type plantWrap struct{ *exec.Cmd }
+func plantEmbed(w plantWrap) { w.Path = "/usr/bin/touch" }`, "selects exec.Cmd's Path"},
+		{"exec.Command through an alias", `import ex "os/exec"
+var _ = ex.Command`, "os/exec.Command"},
+		{"os.StartProcess", `import "os"
+var _ = os.StartProcess`, "os.StartProcess"},
+		{"os.FindProcess", `import "os"
+var _, _ = os.FindProcess(1)`, "os.FindProcess"},
+		{"a syscall name off the list", `import "syscall"
+var _ = syscall.RawSyscall`, "syscall.RawSyscall"},
+		{"unsafe", `import "unsafe"
+var _ = unsafe.Sizeof(0)`, "imports unsafe"},
+		{"cgo", `import "C"`, "imports C"},
+		{"a generic type", `type plantBox[T any] struct{ v T }`, "generic type"},
+		{"a generic from the standard library", `import "sync"
+var plantOnce = sync.OnceValue(func() int { return 1 })`, "instantiates"},
+	}
+	for _, plant := range plants {
+		t.Run(plant.name, func(t *testing.T) {
+			t.Parallel()
+			parsed, err := parser.ParseFile(set, "internal/process/plant.go", "package process\n"+plant.source+"\n", parser.ParseComments)
+			if err != nil {
+				t.Fatalf("parse the plant: %v", err)
+			}
+			files := append(append([]moduleFile(nil), shipped...), moduleFile{path: "internal/process/plant.go", pkg: "internal/process", file: parsed, set: set})
+			violations := processTypeViolations(files)
+			for _, violation := range violations {
+				if strings.Contains(violation, plant.want) {
+					return
+				}
+			}
+			t.Fatalf("the typed scan missed it; it found %q, want one mentioning %q", violations, plant.want)
+		})
+	}
+
+	for _, plant := range []struct{ path, source, want string }{
+		{"internal/version/plant.go", "package version\n// #include <stdlib.h>\nimport \"C\"\n", `"C"`},
+		{"internal/version/plant_test.go", "package version\nimport \"C\"\n", `"C"`},
+		{"internal/version/plant.go", "package version\nimport \"net/http/cgi\"\n", "net/http/cgi"},
+		{"internal/version/plant_test.go", "package version\nimport \"net/http/cgi\"\n", "net/http/cgi"},
+		{"internal/version/plant.go", "package version\nimport \"plugin\"\n", "plugin"},
+		{"internal/version/plant.go", "package version\nimport \"go/build\"\n", "go/build"},
+		{"internal/version/plant.go", "package version\nimport gi \"go/importer\"\n", "go/importer"},
+	} {
+		parsed, err := parser.ParseFile(token.NewFileSet(), plant.path, plant.source, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", plant.path, err)
+		}
+		if violations := moduleWideViolations(plant.path, parsed); len(violations) == 0 || !strings.Contains(violations[0], plant.want) {
+			t.Errorf("%s importing %s is not refused: %v", plant.path, plant.want, violations)
+		}
+	}
+	for extension := range nonGoSources {
+		if len(moduleWideViolations("internal/version/plant"+extension, nil)) == 0 {
+			t.Errorf("a %s file is not refused", extension)
+		}
+	}
+	if violations := moduleWideViolations("internal/version/version_test.go", nil); len(violations) != 0 {
+		t.Errorf("a test file is refused for being one: %v", violations)
 	}
 }
 

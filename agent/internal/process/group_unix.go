@@ -4,7 +4,6 @@ package process
 
 import (
 	"os"
-	"os/exec"
 	"syscall"
 )
 
@@ -12,15 +11,10 @@ import (
 // gets a process group of its own that can be killed whole.
 const supported = true
 
-// isolate puts the child in a new process group, whose id is its pid, and
-// makes a context that ends kill that whole group rather than the child
-// alone.
-func isolate(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	command.Cancel = func() error {
-		killGroup(command.Process.Pid)
-		return nil
-	}
+// processGroup is the child's attributes: a new process group, whose id is
+// its pid, so killGroup can reach everything the child starts.
+func processGroup() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{Setpgid: true}
 }
 
 // killGroup sends SIGKILL to every process still in the group the child led.

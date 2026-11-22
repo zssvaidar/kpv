@@ -177,7 +177,13 @@ func Run(ctx context.Context, program Program, stdin []byte) (Output, error) {
 	command.Stdout = stdout
 	command.Stderr = stderr
 	command.WaitDelay = waitDelay
-	isolate(command)
+	// The child leads a process group of its own, and a context that ends
+	// kills that whole group rather than the child alone.
+	command.SysProcAttr = processGroup()
+	command.Cancel = func() error {
+		killGroup(command.Process.Pid)
+		return nil
+	}
 
 	if err := command.Start(); err != nil {
 		if running.Err() != nil {

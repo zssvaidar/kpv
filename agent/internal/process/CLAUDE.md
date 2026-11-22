@@ -22,8 +22,47 @@ comment in `process.go` gives the reasons; these are the rules, and
   is compared unquoted (`"\x2dc"` is `-c`) and folded through `+` and string
   constants (`"s" + "h"`); a string built at run time is not seen, which is
   why a child's arguments come only from the table.
-  `TestTheCommandScanCatchesEveryPlantedViolation` feeds each of these, and
-  each bypass QA found, to the same scan
+  `TestTheCommandScanCatchesEveryPlantedViolation` feeds each of these to the
+  same scan
+- this package is also type checked (`processTypeViolations`, go/types with
+  the compiler's export data, for the files that build on the test's
+  platform), against allowlists rather than bans:
+  - it may import only `bytes`, `context`, `errors`, `fmt`, `os`, `os/exec`,
+    `path/filepath`, `strings`, `sync`, `syscall` and `time`, so `reflect`,
+    `unsafe`, `plugin` and cgo's `"C"` fail by being absent. It declares no
+    type parameter or generic type and instantiates no generic, so no type
+    argument can make an `exec.Cmd`
+  - of `os/exec` it uses only `CommandContext`, `LookPath`, `ErrWaitDelay` and
+    `Cmd`; of `os` only `Getenv`, `LookupEnv` and `ProcessState`; of
+    `syscall` only the five names above. Each is resolved by the type
+    checker, so no alias or function value reaches another
+  - `exec.CommandContext` appears once, as the callee of a call, in `Run`;
+    as a value it fails. Every `*exec.Cmd` value and every use of the name
+    `exec.Cmd` is inside `Run` (the process group's attributes come from
+    `processGroup()` in `group_unix.go`, so no helper holds the command). No
+    expression has type `exec.Cmd` anywhere, so a literal, a copy (`d := *c`)
+    or a dereference fails, and so does `new(exec.Cmd)`
+  - of `exec.Cmd`'s fields and methods it selects only `Args` (as
+    `Args[...]`), `Env`, `Dir`, `Stdin`, `Stdout`, `Stderr`, `WaitDelay`,
+    `SysProcAttr`, `Cancel`, `Process`, `ProcessState`, `Start` and `Wait`,
+    through an embedding too, so the command cannot be pointed at another
+    `Path` or started by `Run` or `Output`
+  - a file that does not type check fails.
+    `TestTheTypedProcessScanCatchesEveryPlantedRoute` plants each of QA's round-2 routes (the function value,
+    the generic zero value, `reflect.New`, the dereferenced copy) and the
+    others above next to the shipped files
+  - not seen: the files that build only elsewhere (`group_other.go` on unix)
+    are type checked only on such a platform, and both halves are still held
+    by the syntax scan
+- module-wide, in every file test files included,
+  `TestNoFileInTheModuleReachesAProcessAnotherWay` refuses `import "C"` (cgo, whose `C.system` runs a
+  shell), `net/http/cgi` (its `Handler` runs the program it names) and
+  `plugin`, refuses `go/build` and `go/importer` (both run the go command)
+  outside test files, where the boundary test uses `go/importer` to type
+  check, and refuses any non-Go source the go command would build into a
+  package (`.s`, `.S`, `.sx`, `.c`, `.cc`, `.cxx`, `.cpp`, `.m`, `.h`, `.hh`,
+  `.hpp`, `.hxx`, `.f`, `.F`, `.for`, `.f90`, `.swig`, `.swigcxx`, `.syso`),
+  since none of the scans read it
 - this package imports no other agent package (`source_test.go`)
 - `Run(ctx, program, stdin)` runs only a `Program`, whose fields are
   unexported. Every non-test `Program` comes from the table in `programs.go`
@@ -31,8 +70,11 @@ comment in `process.go` gives the reasons; these are the rules, and
   in `newProgram`: a `Program` literal, `new(Program)`, a variable declared as
   a `Program` or an assignment to one of its fields anywhere else in the
   package fails `TestOnlyProgramsGoBuildsAProgram`, and
-  `TestTheProgramCheckCatchesEveryPlantedBuild` plants each (`source_test.go`). The zero `Program`, the only one
-  another package can write, is `invalidProgram` and starts nothing
+  `TestTheProgramCheckCatchesEveryPlantedBuild` plants each
+  (`source_test.go`). A literal whose type is left out (`[]Program{{...}}`)
+  is found by type checking (`programs_types_test.go`). The zero `Program`,
+  the only one another package can write, is `invalidProgram` and starts
+  nothing
 - an entry fixes a bare executable name looked up on `PATH`, its whole
   argument list, the environment variable names passed through, a timeout and
   a stdout cap. `TestEveryProgramInTheTableIsWellFormed` (`programs_test.go`)

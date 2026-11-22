@@ -4,7 +4,7 @@ package process
 
 import (
 	"os"
-	"os/exec"
+	"syscall"
 )
 
 // supported is false: without process groups there is no way to kill
@@ -12,7 +12,7 @@ import (
 // unsupported. Job objects on Windows are #95.
 const supported = false
 
-func isolate(*exec.Cmd) {}
+func processGroup() *syscall.SysProcAttr { return nil }
 
 func killGroup(int) {}
 

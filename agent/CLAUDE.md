@@ -64,7 +64,12 @@ Module-wide, in `internal/projectfs/boundary_test.go`:
   through each file's imports, and `os`, `os/exec`, `syscall`,
   `path/filepath`, `io/ioutil` and `io/fs` may not be imported under another
   name anywhere, which also holds the filesystem test below; a reference is
-  banned whether it is called or not. A later issue that needs a program adds
+  banned whether it is called or not. `internal/process` is also type checked
+  against allowlists of imports, names and `exec.Cmd` selections, and no file
+  in the module, test files included, may import `"C"`, `net/http/cgi` or
+  `plugin`, nor a non-test file `go/build` or `go/importer`, and the module
+  holds no non-Go source (`internal/process/CLAUDE.md` says exactly what is
+  and is not seen). A later issue that needs a program adds
   its entry to `programs.go` and its package, with the reason, to
   `processImporters` in the boundary test, instead of making a new exception;
   `internal/httpapi` never imports it
