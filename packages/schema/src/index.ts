@@ -80,6 +80,12 @@ export type * from './generated/parser-types.js';
 export * from './generated/parser-zod.js';
 export { parserJsonSchema } from './generated/parser-json-schema.js';
 
+// The working-copy endpoints (#43): the working copies, a review, an apply or
+// restore report, a snapshot, or an error.
+export type * from './generated/workcopy-types.js';
+export * from './generated/workcopy-zod.js';
+export { workcopyJsonSchema } from './generated/workcopy-json-schema.js';
+
 // The connection combination rules the schema states in prose, which the Go
 // agent implements again in internal/connections/rules.go.
 export type {

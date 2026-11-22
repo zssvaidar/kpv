@@ -81,6 +81,23 @@ The source file endpoints (`sources.go`, #87)
   1 MiB is `tooLarge`. `changed` carries the current hash, never the text; no
   answer or log line carries a path or the text (`sources_test.go`)
 
+The working-copy endpoints (`workcopies.go`, #43)
+
+- `GET /api/workcopies` lists every working copy (an unavailable pipeline with
+  its reason), `GET /api/workcopies/review?root=&directory=` (as the open route
+  takes them) answers what is staged with each file's base and staged text
+  when it is ready, and the snapshots; `POST /api/workcopies/apply` and
+  `POST /api/workcopies/discard` take the review's `revision`,
+  `POST /api/workcopies/restore` and `DELETE /api/workcopies/snapshot` a
+  `snapshot` id. They go through the `*workcopy.Store` in
+  `Options.Workcopies`, wired in `cmd/agent/main.go`. No route stages: only
+  the tool does, in process (`internal/workcopy/source_test.go` fails when
+  this package names `Stage`)
+- bodies are read token by token, at most 8192 bytes, `root`, `directory`
+  and the one other field each once, spelled exactly. `drift` carries every
+  differing path and what it is now, never a text; no log line carries a
+  path or a text (`workcopies_test.go`)
+
 The checks every request gets (`guard.go`, `origin.go`, `guard_test.go`,
 `origin_test.go`)
 

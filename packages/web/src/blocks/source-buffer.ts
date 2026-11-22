@@ -350,6 +350,8 @@ export const codeWords = {
     'The file changed on disk since it was read. What you typed is kept; reload to see the file as it is now.',
   saving: 'Saving',
   nothingToSave: 'Nothing to save',
+  /** A file the tool has staged a change to (#43); the editor shows disk. */
+  staged: 'This file has staged changes waiting for review',
 } as const;
 
 /** What a request that got no usable answer says, in #8's words. */

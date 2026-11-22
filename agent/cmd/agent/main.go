@@ -15,6 +15,7 @@ import (
 	"github.com/zssvaidar/kpv/agent/internal/httpapi"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 	"github.com/zssvaidar/kpv/agent/internal/version"
+	"github.com/zssvaidar/kpv/agent/internal/workcopy"
 )
 
 func main() {
@@ -64,7 +65,21 @@ func start(out io.Writer, logger *slog.Logger) (*httpapi.Server, error) {
 		return nil, err
 	}
 	store := connections.Open(connectionsFile, pipelines, logger)
-	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser, Roots: roots, Pipelines: pipelines, Connections: store})
+	// The working copies and snapshots (#43) are files of a private tree
+	// beside the roots store, outside every root; with no store there,
+	// staging and apply answer unavailable. Nothing here stages: #77 and #97
+	// call workcopy.Store.Stage in process.
+	workcopiesTree, err := projectfs.OpenPrivateTree(roots, workcopy.TreeName)
+	if err != nil {
+		_ = browser.Close()
+		return nil, err
+	}
+	workcopies, err := workcopy.New(pipelines, workcopiesTree, logger)
+	if err != nil {
+		_ = browser.Close()
+		return nil, err
+	}
+	server, err := httpapi.New(httpapi.Options{Logger: logger, Browser: browser, Roots: roots, Pipelines: pipelines, Connections: store, Workcopies: workcopies})
 	if err != nil {
 		_ = browser.Close()
 		return nil, err

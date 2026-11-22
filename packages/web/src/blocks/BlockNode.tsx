@@ -176,6 +176,14 @@ export interface CodeActions {
   onChange: (path: string, text: string) => void;
   onSave: (path: string) => void;
   onReload: (path: string) => void;
+  /**
+   * The paths the tool has staged a change to (#43), which the node says in
+   * a fixed sentence with a control that opens the review. The editor still
+   * shows the file as it is on disk.
+   */
+  stagedPaths?: readonly string[];
+  /** Opens the review of the staged changes. */
+  onReview?: () => void;
 }
 
 export interface CustomCodeNodeProps extends BlockNodeProps<CustomCodeStep> {
@@ -253,6 +261,20 @@ function CodePanel(props: { code: CodeView; actions: CodeActions }) {
           Symbol <code>{code.symbol}</code>
         </p>
       )}
+      {actions.stagedPaths?.includes(path) === true ? (
+        <p className="code-message code-staged" role="status">
+          {codeWords.staged}{' '}
+          {actions.onReview === undefined ? null : (
+            <button
+              type="button"
+              className="nodrag"
+              onClick={() => actions.onReview?.()}
+            >
+              Review staged changes
+            </button>
+          )}
+        </p>
+      ) : null}
       {code.kind === 'loading' ? (
         <p className="code-message">{codeWords.loading}</p>
       ) : null}

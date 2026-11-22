@@ -53,6 +53,20 @@ type privateFile struct {
 	// pendingBackup says the file on disk could not be read, and has to be
 	// moved aside before anything is written over it.
 	pendingBackup bool
+	// limit is the most bytes read before the file is corrupt;
+	// maxStoreBytes when 0. A private tree's files have a larger one.
+	limit int64
+	// inTree is a file of a PrivateTree: its directory is the tree, and the
+	// store directory above it is given storeDirectoryMode too.
+	inTree bool
+}
+
+// readLimit is the most bytes the file may hold.
+func (s *privateFile) readLimit() int64 {
+	if s.limit > 0 {
+		return s.limit
+	}
+	return maxStoreBytes
 }
 
 func newPrivateFile(file string) *privateFile {
@@ -90,13 +104,13 @@ func (s *privateFile) read() ([]byte, bool, ErrorKind) {
 		s.pendingBackup = true
 		return nil, true, storeUnreadable
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, maxStoreBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(file, s.readLimit()+1))
 	_ = file.Close()
 	if err != nil {
 		s.pendingBackup = true
 		return nil, true, storeUnreadable
 	}
-	if len(raw) > maxStoreBytes {
+	if int64(len(raw)) > s.readLimit() {
 		s.pendingBackup = true
 		return nil, true, storeCorrupt
 	}
@@ -215,6 +229,11 @@ func (s *privateFile) write(body []byte) error {
 	}
 	// The directory is the agent's own, so it is given its mode whatever the
 	// umask made it, and whatever an earlier version left.
+	if s.inTree {
+		if err := os.Chmod(filepath.Dir(directory), storeDirectoryMode); err != nil {
+			return fail("the store's directory could not be given its mode", err)
+		}
+	}
 	if err := os.Chmod(directory, storeDirectoryMode); err != nil {
 		return fail("the store's directory could not be given its mode", err)
 	}

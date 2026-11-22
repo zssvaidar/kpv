@@ -133,6 +133,40 @@ const everyRequest: [string, (api: AgentClient) => Promise<unknown>][] = [
       }),
   ],
   ['deleteConnection', (api) => api.deleteConnection({ name: 'local' })],
+  ['listWorkcopies', (api) => api.listWorkcopies()],
+  [
+    'reviewWorkcopy',
+    (api) => api.reviewWorkcopy({ root: '/home/user/code', directory: 'a' }),
+  ],
+  [
+    'applyWorkcopy',
+    (api) =>
+      api.applyWorkcopy({ root: '/home/user/code', revision: 'a'.repeat(32) }),
+  ],
+  [
+    'restoreSnapshot',
+    (api) =>
+      api.restoreSnapshot({
+        root: '/home/user/code',
+        snapshot: '20261122T101500Z-0a1b2c3d',
+      }),
+  ],
+  [
+    'discardWorkcopy',
+    (api) =>
+      api.discardWorkcopy({
+        root: '/home/user/code',
+        revision: 'a'.repeat(32),
+      }),
+  ],
+  [
+    'removeSnapshot',
+    (api) =>
+      api.removeSnapshot({
+        root: '/home/user/code',
+        snapshot: '20261122T101500Z-0a1b2c3d',
+      }),
+  ],
 ];
 
 describe('createAgentClient', () => {
@@ -156,19 +190,25 @@ describe('createAgentClient', () => {
   it('exposes nothing but the typed calls, so no caller can send its own request', () => {
     const { api } = client(() => json(200, listing));
     expect(Object.keys(api).sort()).toEqual([
+      'applyWorkcopy',
       'authorizeRoot',
       'createConnection',
       'createPipeline',
       'deleteConnection',
+      'discardWorkcopy',
       'listConnectionNames',
       'listConnections',
       'listDirectories',
       'listPipelines',
       'listRoots',
+      'listWorkcopies',
       'openChannel',
       'openPipeline',
       'probe',
       'readSource',
+      'removeSnapshot',
+      'restoreSnapshot',
+      'reviewWorkcopy',
       'revokeRoot',
       'updateConnection',
       'writeSource',
@@ -678,5 +718,104 @@ describe('the connection methods', () => {
         name: 'x',
       }),
     ).toEqual({ kind: 'error', status: 404, error: notFound });
+  });
+});
+
+describe('the working-copy calls (#43)', () => {
+  const revision = 'a'.repeat(32);
+  const snapshot = '20261122T101500Z-0a1b2c3d';
+  const review = {
+    root: '/home/user/code',
+    directory: 'orders',
+    revision,
+    files: [
+      {
+        path: 'src/main.py',
+        change: 'modified',
+        state: 'ready',
+        baseText: 'a\r\n',
+        stagedText: 'a\n',
+      },
+    ],
+    unreadable: false,
+    snapshots: [],
+  };
+  const report = {
+    root: '/home/user/code',
+    directory: 'orders',
+    snapshot,
+    complete: true,
+    files: [{ path: 'src/main.py', result: 'written' }],
+  };
+
+  it('reviews with GET and the root and directory as the open route takes them', async () => {
+    const { api, sent } = client(() => json(200, review));
+    expect(
+      await api.reviewWorkcopy({
+        root: '/home/user/code',
+        directory: 'orders',
+      }),
+    ).toEqual({ kind: 'ok', value: review });
+    await api.reviewWorkcopy({ root: '/home/user/single' });
+    const first = new URL(sent[0]?.url ?? '');
+    expect(first.pathname).toBe('/api/workcopies/review');
+    expect([...first.searchParams.keys()]).toEqual(['root', 'directory']);
+    expect([...new URL(sent[1]?.url ?? '').searchParams.keys()]).toEqual([
+      'root',
+    ]);
+  });
+
+  it('applies, restores, discards and removes with exactly the request fields', async () => {
+    const { api, sent } = client((url) =>
+      url.endsWith('/discard')
+        ? json(200, { root: '/r', discarded: 1 })
+        : url.endsWith('/snapshot')
+          ? json(200, { root: '/r', snapshot })
+          : json(200, report),
+    );
+    expect(
+      await api.applyWorkcopy({
+        root: '/home/user/code',
+        directory: 'orders',
+        revision,
+      }),
+    ).toEqual({ kind: 'ok', value: report });
+    await api.restoreSnapshot({ root: '/r', snapshot });
+    await api.discardWorkcopy({ root: '/r', revision });
+    await api.removeSnapshot({ root: '/r', snapshot });
+    const shapes = sent.map((request) => [
+      new URL(request.url).pathname,
+      request.init?.method,
+      JSON.parse(request.init?.body as string) as unknown,
+    ]);
+    expect(shapes).toEqual([
+      [
+        '/api/workcopies/apply',
+        'POST',
+        { root: '/home/user/code', directory: 'orders', revision },
+      ],
+      ['/api/workcopies/restore', 'POST', { root: '/r', snapshot }],
+      ['/api/workcopies/discard', 'POST', { root: '/r', revision }],
+      ['/api/workcopies/snapshot', 'DELETE', { root: '/r', snapshot }],
+    ]);
+    for (const request of sent) {
+      expect(new Headers(request.init?.headers).get('Content-Type')).toBe(
+        'application/json',
+      );
+    }
+  });
+
+  it("reads a drift as the endpoint's own error, with every file", async () => {
+    const drift = {
+      error: 'drift',
+      message: 'm',
+      drift: [{ path: 'src/a.py', now: 'changed' }],
+    };
+    expect(
+      await client(() => json(409, drift)).api.applyWorkcopy({
+        root: '/r',
+        revision,
+      }),
+    ).toEqual({ kind: 'error', status: 409, error: drift });
   });
 });

@@ -10,6 +10,8 @@ import { pipelinesErrorTitles, unreadableWords } from '../pipelines/words.ts';
 import { codeWords } from '../blocks/source-buffer.ts';
 import { graphFixtures } from '../graph/fixtures.ts';
 import { App, discardQuestion, Shell } from './App.tsx';
+import { createReviewController } from '../review/controller.ts';
+import { reviewWords } from '../review/words.ts';
 import { createSourcesController } from './sources.ts';
 
 // What a person reads, without the markup: React escapes quotes in text.
@@ -301,5 +303,90 @@ describe('the custom-code files (#14)', () => {
     expect(discardQuestion(['src/a.py', 'src/b.py'])).toContain(
       'src/a.py, src/b.py',
     );
+  });
+});
+
+describe('the staged changes of an opened pipeline (#43)', () => {
+  async function openedWithReview(files: unknown[], open = false) {
+    const agent = fakeAgent();
+    const controller = createPipelinesController(agent.client);
+    controller.setOnline(true);
+    agent
+      .next('GET', '/api/pipelines')
+      .answer(json(200, fixtureList('every-state')));
+    await agent.settle();
+    const location = { root: '/home/user/code/app', directory: 'billing' };
+    controller.open(location);
+    const document = pipelinesFixtures.documents.valid[0]?.body;
+    agent.next('GET', '/api/pipelines/open').answer(
+      json(200, {
+        ...(document as object),
+        pipeline: graphFixtures['every-block-type'],
+      }),
+    );
+    await agent.settle();
+    const review = createReviewController(agent.client, location);
+    review.setOnline(true);
+    agent.next('GET', '/api/workcopies/review').answer(
+      json(200, {
+        ...location,
+        ...(files.length === 0 ? {} : { revision: 'a'.repeat(32) }),
+        files,
+        unreadable: false,
+        snapshots: [],
+      }),
+    );
+    await agent.settle();
+    if (open) review.show();
+    const sources = createSourcesController(agent.client, location);
+    return renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipelines={controller}
+        sources={sources}
+        review={review}
+      />,
+    );
+  }
+
+  const staged = [
+    {
+      path: 'pipeline.yaml',
+      change: 'modified',
+      state: 'ready',
+      baseText: 'id: a\n',
+      stagedText: 'id: a\nname: A\n',
+    },
+    {
+      path: 'src/discounts.go',
+      change: 'modified',
+      state: 'ready',
+      baseText: 'package discounts\n',
+      stagedText: 'package discounts // staged\n',
+    },
+  ];
+
+  it('shows how many files are staged and a control that opens the review', async () => {
+    const html = await openedWithReview(staged);
+    expect(text(html)).toContain(reviewWords.staged(2));
+    expect(html).toContain('Review staged changes');
+    // The pipeline's own file is staged, so it says so.
+    expect(text(html)).toContain(codeWords.staged);
+    // The review itself is not drawn until it is opened.
+    expect(html).not.toContain('class="review"');
+  });
+
+  it('shows neither with nothing staged', async () => {
+    const html = await openedWithReview([]);
+    expect(html).not.toContain('Review staged changes');
+    expect(text(html)).not.toContain('staged');
+  });
+
+  it('draws the review once it is opened', async () => {
+    const html = await openedWithReview(staged, true);
+    expect(html).toContain('class="review"');
+    expect(html).toContain('src/discounts.go');
+    expect(html).toContain('data-kind="added"');
   });
 });

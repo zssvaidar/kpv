@@ -30,7 +30,13 @@
 // drawn below those words, so code typed and not yet saved stays in view,
 // with its Save disabled until the agent is back.
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 import type { Pipeline } from '@kpv/schema';
 
@@ -41,6 +47,7 @@ import {
   type ConnectionsController,
 } from '../connections/controller.ts';
 import {
+  codeWords,
   droppedPaths,
   sourcePaths,
   stepsNaming,
@@ -77,6 +84,12 @@ import {
   pickerAnchor,
   PipelinesView,
 } from '../pipelines/PipelinesScreen.tsx';
+import {
+  createReviewController,
+  type ReviewController,
+} from '../review/controller.ts';
+import { ReviewPanel } from '../review/ReviewPanel.tsx';
+import { reviewWords } from '../review/words.ts';
 import { createSourcesController, type SourcesController } from './sources.ts';
 
 /**
@@ -139,6 +152,8 @@ export function Shell(props: {
   sources?: SourcesController;
   /** Asks the person a yes or no question; `window.confirm` by default. */
   confirm?: (question: string) => boolean;
+  /** The staged-changes review; by default one per opened pipeline. */
+  review?: ReviewController;
 }) {
   const { state, client } = props;
   const [screen, setScreen] = useState(props.screen ?? 'pipelines');
@@ -216,6 +231,51 @@ export function Shell(props: {
   const ask = useMemo(
     () => confirmQuestion ?? ((question: string) => window.confirm(question)),
     [confirmQuestion],
+  );
+  // After an apply or restore wrote these paths, every buffer held for one
+  // is read again, so no editor shows the text from before as read. Typed
+  // code in one is dropped only after asking; a buffer kept is then saved
+  // against a hash the file no longer has, which the save reports.
+  const rereadWritten = useRef((paths: readonly string[]) => {
+    void paths;
+  });
+  rereadWritten.current = (paths) => {
+    if (sources === null) return;
+    const held = paths.filter(
+      (path) => sources.current().buffers[path] !== undefined,
+    );
+    const unsaved = held.filter((path) =>
+      sources.current().unsaved.includes(path),
+    );
+    const dropTyped = unsaved.length === 0 || ask(discardQuestion(unsaved));
+    for (const path of held) {
+      if (dropTyped || !unsaved.includes(path)) sources.reload(path);
+    }
+  };
+  // The staged changes of the opened pipeline (#43): one review per opened
+  // entry, read when it is drawn and after every action.
+  const review = useMemo(
+    () =>
+      props.review ??
+      (openedEntry === null
+        ? null
+        : createReviewController(client, openedEntry.location, (paths) => {
+            rereadWritten.current(paths);
+          })),
+    [props.review, openedEntry, client],
+  );
+  useEffect(() => {
+    review?.setOnline(connectedNow);
+  }, [review, connectedNow]);
+  const reviewState = useSyncExternalStore(
+    review?.subscribe ?? noSubscription,
+    () => review?.current() ?? null,
+    () => review?.current() ?? null,
+  );
+  const stagedFiles = reviewState?.review?.files;
+  const stagedPaths = useMemo(
+    () => stagedFiles?.map((file) => file.path) ?? noPaths,
+    [stagedFiles],
   );
   // The pipeline as edited, the selected node, why the last edit was refused
   // and the Kafka forms' unsaved input, owned here so the side panel can read
@@ -381,8 +441,16 @@ export function Shell(props: {
         if (unsaved && !ask(discardQuestion([path]))) return;
         sources.reload(path);
       },
+      stagedPaths,
+      ...(review === null
+        ? {}
+        : {
+            onReview: () => {
+              review.show();
+            },
+          }),
     };
-  }, [sources, language, offline, ask]);
+  }, [sources, language, offline, ask, stagedPaths, review]);
   // The custom-code blocks whose file holds unsaved code, as the side panel
   // lists them beside the forms.
   const unsavedCodeNodes =
@@ -402,6 +470,34 @@ export function Shell(props: {
         onSelect={onSelect}
         onEdit={onEdit}
         {...(code === undefined ? {} : { code })}
+      />
+    );
+  // How many files are staged, with the control that opens the review, and
+  // the sentence when the pipeline's own pipeline.yaml is one of them.
+  const stagedSummary =
+    review === null || stagedPaths.length === 0 ? null : (
+      <div className="staged-summary" role="status">
+        <span>{reviewWords.staged(stagedPaths.length)}</span>
+        {stagedPaths.some((path) => path.toLowerCase() === 'pipeline.yaml') ? (
+          <span> pipeline.yaml: {codeWords.staged}</span>
+        ) : null}{' '}
+        <button
+          type="button"
+          onClick={() => {
+            review.show();
+          }}
+        >
+          Review staged changes
+        </button>
+      </div>
+    );
+  const reviewPanel =
+    review === null || reviewState === null || !reviewState.open ? null : (
+      <ReviewPanel
+        state={reviewState}
+        actions={review}
+        offline={offline}
+        confirm={ask}
       />
     );
   const notice = (
@@ -467,6 +563,8 @@ export function Shell(props: {
                 Back to the pipelines
               </button>
             )}
+            {stagedSummary}
+            {reviewPanel}
             {graph}
           </>
         ) : connected && listed.openFailure !== null ? (
@@ -476,6 +574,8 @@ export function Shell(props: {
         ) : graph !== null && listed.opened !== null ? (
           <>
             {notice}
+            {stagedSummary}
+            {reviewPanel}
             {graph}
           </>
         ) : (

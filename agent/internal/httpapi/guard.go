@@ -9,6 +9,7 @@ import (
 	"github.com/zssvaidar/kpv/agent/internal/channel"
 	"github.com/zssvaidar/kpv/agent/internal/connections"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
+	"github.com/zssvaidar/kpv/agent/internal/workcopy"
 )
 
 // tokenParameter is the query parameter the session token may arrive in, and
@@ -63,6 +64,10 @@ type guard struct {
 	// summaries without credentials; this package never calls its in-process
 	// read. A nil connections answers those routes with the uniform rejection.
 	connections *connections.Store
+	// workcopies is what the working-copy endpoints list, review, apply,
+	// restore and discard through (#43). A nil workcopies answers those
+	// routes with the uniform rejection. No route stages.
+	workcopies *workcopy.Store
 }
 
 // wrap returns next behind the checks. Every request, including one that

@@ -6,7 +6,7 @@
 // it, and `pnpm run generate:check` (which CI runs) regenerates and fails when
 // the committed output differs, which is also what catches a hand-edit.
 //
-// There are eight schemas, and they are separate files because they describe
+// There are nine schemas, and they are separate files because they describe
 // separate things:
 //   - schema/pipeline.schema.json   the pipeline model
 //   - schema/channel.schema.json    the envelope the agent pushes over the
@@ -32,6 +32,10 @@
 //   - schema/parser.schema.json     what a parser reports about a source
 //                                   file (#37): its stages, the regions it
 //                                   could not read, and its warnings
+//   - schema/workcopy.schema.json   what the working-copy endpoints take and
+//                                   answer (#43): the working copies, a
+//                                   review, an apply or restore report, a
+//                                   snapshot, or an error
 // Each one generates the same four artifacts: TypeScript types, Zod schemas,
 // the raw schema as a module, and Go structs plus a copy of the schema the Go
 // module can embed.
@@ -169,6 +173,19 @@ const schemas = [
     rawConst: 'parserJsonSchema',
     goPackage: 'parser',
     goDir: join('agent', 'internal', 'parser'),
+  },
+  {
+    file: 'workcopy.schema.json',
+    prefix: 'workcopy',
+    rootName: 'WorkcopyList',
+    rootConst: 'workcopyListSchema',
+    rawConst: 'workcopyJsonSchema',
+    goPackage: 'httpapi',
+    goDir: join('agent', 'internal', 'httpapi'),
+    goFile: 'workcopies_models_gen.go',
+    // The review, the requests, the report and the error are definitions the
+    // list does not refer to, and a client needs every one of them.
+    unreachableDefinitions: true,
   },
 ];
 
@@ -496,6 +513,47 @@ const assertTheSourceCopiesMatch = (byFile) => {
 };
 
 /**
+ * The working-copy endpoints (#43) name a staged file by the source
+ * endpoints' path rule and say why a root is unavailable in their words, and
+ * the files cannot share a `$ref`; this keeps the two copies the same.
+ */
+const assertTheWorkcopyCopiesMatch = (byFile) => {
+  const rule = (node) =>
+    node === undefined
+      ? undefined
+      : JSON.stringify({
+          type: node.type,
+          minLength: node.minLength,
+          maxLength: node.maxLength,
+          pattern: node.pattern,
+        });
+  const source = rule(byFile['source.schema.json']?.$defs?.sourcePath);
+  const own = rule(byFile['workcopy.schema.json']?.$defs?.workcopyPath);
+  const reasons = byFile['source.schema.json']?.$defs?.sourceRootReason?.enum;
+  const copied =
+    byFile['workcopy.schema.json']?.$defs?.workcopyRootReason?.enum;
+  if (
+    source === undefined ||
+    own === undefined ||
+    !Array.isArray(reasons) ||
+    !Array.isArray(copied)
+  ) {
+    throw new Error(
+      'the source sourcePath or sourceRootReason, or the workcopy workcopyPath or workcopyRootReason, is gone, so nothing is holding the copies to the same rules',
+    );
+  }
+  if (source !== own || JSON.stringify(reasons) !== JSON.stringify(copied)) {
+    throw new Error(
+      [
+        'the working-copy endpoints and the source endpoints disagree:',
+        `  schema/source.schema.json   $defs/sourcePath ${source}, $defs/sourceRootReason ${JSON.stringify(reasons)}`,
+        `  schema/workcopy.schema.json $defs/workcopyPath ${own}, $defs/workcopyRootReason ${JSON.stringify(copied)}`,
+      ].join('\n'),
+    );
+  }
+};
+
+/**
  * A parser stage is a pipeline step, so the contract's stage types copy the
  * step type discriminators of the pipeline schema: every definition there
  * whose required `type` is pinned to one value. The files cannot share a
@@ -690,6 +748,7 @@ const main = async () => {
   assertTheUncheckedReasonsMatch(byFile);
   assertTheSourceCopiesMatch(byFile);
   assertTheParserStageTypesMatch(byFile);
+  assertTheWorkcopyCopiesMatch(byFile);
 
   for (const { spec, schema, source } of sources) {
     await generate(spec, schema, source);

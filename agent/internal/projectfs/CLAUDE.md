@@ -61,12 +61,23 @@ Project roots (`roots.go`, `store.go`, tests in `roots_test.go`, `gone_test.go`)
   is made `0700` on every write whatever the umask. Being in that directory
   is what keeps it outside every root. No store: it is nil. A function, not a
   `Roots` method, so a holder of `Roots` (httpapi) cannot reach it
+- `OpenPrivateTree(roots, name)` (`private.go`, #43) is the private-tree
+  authorization beside it: a directory `<store dir>/<name>/` of flat files
+  (`File`, `Names`, `Remove`), each a `PrivateFile` of at most
+  `MaxPrivateTreeFile` (64 MiB) with the same read, move-aside and atomic
+  write; the tree and the store directory above it are made `0700` on every
+  write, files `0600`. `internal/workcopy` keeps its working copies and
+  snapshots in `os.UserConfigDir()/kpv/workcopies/` through it. The rule that
+  a directory holding the store cannot be a root covers it, so it is never
+  inside a project. No store: nil. `Names` leaves out hidden (temporary) and
+  moved-aside files
 - every stored root is checked again at startup, and again whenever something
   asks about it: every list, every authorize, every browse that lands in it
   (#67). One that is gone is `notFound`, `notDirectory` or `unreadable`; another
   directory at its path is `changed`. It is released from the guard at once,
   stays listed unavailable with its reason, and is available again only after
   an authorize of its path or a restart, never by being looked at. Watching the
-  filesystem, and re-checking before each write (#43), are not done
+  filesystem is not done; `internal/workcopy`'s apply and restore ask about
+  the root again right before they write (#43), through `catalog.Files`
 - logs carry kinds, never a path
 - tests pass `OpenRoots` a scratch store file; nothing here reads the real one

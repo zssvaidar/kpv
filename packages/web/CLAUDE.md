@@ -85,6 +85,26 @@ Rules a change can break
   last step naming unsaved code, going back to the list and Reload ask first
   (`confirm`); an opened pipeline stays drawn while disconnected, Save
   disabled with the connection state as the reason
+- the staged-changes review (`src/review/`, #43): only edits the tool makes
+  are staged (in the agent; the page never stages), the person's own Save
+  stays a direct write. An opened pipeline with staged files shows how many
+  and a "Review staged changes" control (`App.tsx`), and a custom-code node or
+  a staged `pipeline.yaml` says `codeWords.staged` ("This file has staged
+  changes waiting for review") with the same control; the editor keeps
+  showing the disk. `review/controller.ts` owns every request (through
+  `client.ts`'s `reviewWorkcopy`, `applyWorkcopy`, `restoreSnapshot`,
+  `discardWorkcopy`, `removeSnapshot`, `listWorkcopies`), sends apply only
+  when the person activates it with the revision drawn, and reads the review
+  again after every action (a `changed` answer means it was out of date).
+  The diff model (`diff.ts`: lines with their own ending, so a CRLF or
+  final-newline change shows changed lines named CRLF, LF or no final
+  newline), the enabled controls (`controls.ts`; disabled while disconnected
+  with the connection state as the reason) and the panel rendered to a
+  string are tested without a DOM (`review.test.tsx`). After an apply or
+  restore the shell re-reads every buffer it holds for a written path, asking
+  first where one holds typed code. Discard and removing a snapshot ask
+  first. How QA stages changes for a check by hand is in
+  `agent/internal/workcopy/CLAUDE.md`
 - `src/connection/monitor.ts` holds the connection state the status bar shows.
   The channel WebSocket is the liveness signal; on a drop one request says why,
   and it reconnects with backoff (`backoff.ts`: 250ms doubling to 10s) unless

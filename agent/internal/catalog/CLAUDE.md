@@ -96,3 +96,25 @@ Source files (`source.go`, #87)
   `Path.WriteAtomically` (`0644` new), and writes are serialized by
   `Catalog.source`, so a second write with the same hash is `changed`. Tests:
   `sources_test.go`, hooks `midSourceWrite` and `beforeSourcePin`
+
+Staged writes (`files.go`, #43)
+
+- a user's own save is a direct write: `WriteSource` (#87, so #14's and #15's
+  Save), #78's save of `pipeline.yaml` and #48's create write the project file
+  at once, because the user typed and saved those bytes and the hash check
+  makes sure they saw what they replace. An edit the tool composes on the
+  user's behalf (#77's rewrite of another pipeline's `pipeline.yaml`, #97's
+  write-back) is staged in `internal/workcopy` instead and reaches the project
+  only when the user applies it after a review. None of the direct paths
+  changed for this, and a direct save of a staged file is allowed (it shows
+  as drift at apply)
+- `internal/workcopy` reaches the project only through `WithFiles`, which
+  holds `Catalog.source` (so an apply and a `WriteSource` never interleave)
+  and hands it a `Files` over the pinned pipeline directory: `Read` (what is
+  at a path, `Current`), `Verify` (the root asked about again and every held
+  pin still under its name: `link`, `changed`), `Write`
+  (`Path.WriteAtomically`, `0644` new, missing directories `0755` inside their
+  pin) and `Remove` (a regular file only; an emptied directory is kept). It
+  shares `pinOne`, `readSourceIn` and the path rules: `CheckStagedPath` is
+  `sourceSegments` with `pipeline.yaml` allowed and `generated/` refused,
+  `CheckStagedText` is `tooLarge`/`notText`

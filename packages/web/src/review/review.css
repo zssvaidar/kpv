@@ -1,0 +1,61 @@
+/* Layout only. Colours, type and spacing as a system are #53. */
+
+.staged-summary {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+}
+
+.review {
+  max-height: 60%;
+  overflow: auto;
+  padding: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.review-head,
+.review-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.review-files {
+  list-style: none;
+  padding: 0;
+}
+
+.review-diff {
+  border-collapse: collapse;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.review-diff td {
+  padding: 0 0.25rem;
+  vertical-align: top;
+}
+
+.review-number {
+  text-align: right;
+  opacity: 0.6;
+}
+
+.review-line code {
+  white-space: pre;
+}
+
+.review-diff tr[data-kind='removed'] {
+  background: color-mix(in srgb, #d33 20%, transparent);
+}
+
+.review-diff tr[data-kind='added'] {
+  background: color-mix(in srgb, #3a3 20%, transparent);
+}
+
+.review-ending {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}

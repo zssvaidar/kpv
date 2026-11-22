@@ -19,6 +19,7 @@ new outputs (missed in #48, added in #24).
 | `connection.schema.json` | `agent/internal/httpapi/connections_models_gen.go`, and a schema copy in `agent/internal/connections` | `fixtures/connections.json`         | `connection-fixtures.test.ts`, `connections/fixtures_test.go`, `httpapi/connections_fixtures_test.go` |
 | `source.schema.json`     | `agent/internal/httpapi/sources_models_gen.go`                                                        | `fixtures/source-responses.json`    | `source-fixtures.test.ts`, `httpapi/sources_fixtures_test.go`                                         |
 | `parser.schema.json`     | `agent/internal/parser/models_gen.go`                                                                 | `fixtures/parser-results.json`      | `parser-fixtures.test.ts`, `parser/fixtures_test.go`                                                  |
+| `workcopy.schema.json`   | `agent/internal/httpapi/workcopies_models_gen.go`                                                     | `fixtures/workcopy-responses.json`  | `workcopy-fixtures.test.ts`, `httpapi/workcopies_fixtures_test.go`                                    |
 
 The generators are pinned: `go-jsonschema` as a `tool` directive in
 `agent/go.mod`, `json-schema-to-typescript` and `json-schema-to-zod` as root
@@ -104,6 +105,16 @@ What a schema change can break without the change looking wrong
   stages and warnings, no duplicate key, nothing after the document) are the
   harness's, in
   `agent/internal/parser/validate.go`, and not checked on the TypeScript side
+- `workcopy.schema.json` (#43) copies `source.schema.json`'s `sourcePath` as
+  `workcopyPath` and `sourceRootReason` as `workcopyRootReason`; generation
+  fails when either differs. Its pairings (a review has `revision` exactly
+  when it has files, texts only for a `ready` file, `baseText` unless added,
+  `stagedText` unless deleted; a report is `complete` exactly when nothing
+  failed or was not written, an outcome has `kind` exactly when failed; an
+  error has `reason` exactly when `rootUnavailable` and `drift` exactly when
+  `drift`, never `ready`; a summary has `reason` exactly when unavailable)
+  are held by `workcopy-fixtures.test.ts` and
+  `httpapi/workcopies_fixtures_test.go` with `pairingViolations`
 - The channel envelope is its own schema because it carries a pipeline id and
   is not a pipeline, and `internal/channel` may not import `internal/pipeline`
   (`agent/CLAUDE.md`)

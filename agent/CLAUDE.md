@@ -7,7 +7,7 @@ package under `internal/` has its own `CLAUDE.md`.
 
 These rules are tests that read the non-test source, so breaking one fails
 `go test ./...` rather than review. `cmd/agent` wires `httpapi`, `catalog`,
-`connections` and `projectfs` together.
+`connections`, `workcopy` and `projectfs` together.
 
 - `internal/httpapi` may not import `os`, `io/fs`, `io/ioutil`,
   `path/filepath`, `embed`, `os/exec` or `internal/pipeline`, and uses only the
@@ -39,6 +39,11 @@ These rules are tests that read the non-test source, so breaking one fails
   `internal/channel` do not import it, and only `encodeStore` calls `Reveal`
   (`internal/connections/source_test.go`). `internal/httpapi` holds a
   `*connections.Store`
+- `internal/workcopy` (#43) imports `internal/catalog` and
+  `internal/projectfs` and nothing else in the agent, nor `os` or
+  `path/filepath`; no lower package imports it, and `internal/httpapi`, which
+  holds a `*workcopy.Store`, names no staging method
+  (`internal/workcopy/source_test.go`)
 - `internal/projectfs` and `internal/pipeline` import no other agent package.
   No test holds this; it is true today (`go list -f '{{.Imports}}' ./...`)
 - `internal/process` imports no other agent package
@@ -85,8 +90,9 @@ token is written. `packages/web/dev/agent-process.ts` parses the `open` line
 `packages/web/dev/dev.test.ts`.
 
 The agent reads the real `HOME` and `os.UserConfigDir()` (the roots store,
-`internal/projectfs/CLAUDE.md`, and the connection store beside it,
-`internal/connections/CLAUDE.md`). `cmd/agent/main_test.go` points `HOME` and
+`internal/projectfs/CLAUDE.md`, the connection store beside it,
+`internal/connections/CLAUDE.md`, and the working copies in `workcopies/`
+beside them, `internal/workcopy/CLAUDE.md`). `cmd/agent/main_test.go` points `HOME` and
 `XDG_CONFIG_HOME` at scratch directories. `pnpm dev` and
 `packages/web/dev/dev.test.ts` start the agent with the environment they were
 given (`spawn` in `packages/web/dev/agent-process.ts`), so unless `HOME` and

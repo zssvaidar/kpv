@@ -30,7 +30,8 @@ type route struct {
 // and source file endpoints, which reach it only through the catalog.Catalog
 // it carries, and
 // the connection endpoints, which reach it only through the
-// connections.Store it carries.
+// connections.Store it carries, and the working-copy endpoints, which reach
+// it only through the workcopy.Store it carries.
 func apiRoutes() []route {
 	return []route{
 		{"GET /api/health", handleHealth},
@@ -77,6 +78,14 @@ func newHandler(g *guard, routes []route) http.Handler {
 	mux.Handle(connectionsCreatePattern, g.connectionsCreateRoute())
 	mux.Handle(connectionsUpdatePattern, g.connectionsUpdateRoute())
 	mux.Handle(connectionsDeletePattern, g.connectionsDeleteRoute())
+	// The working-copy endpoints (#43), for the same reason again; see
+	// workcopiesListPattern in workcopies.go.
+	mux.Handle(workcopiesListPattern, g.workcopiesListRoute())
+	mux.Handle(workcopyReviewPattern, g.workcopyReviewRoute())
+	mux.Handle(workcopyApplyPattern, g.workcopyApplyRoute())
+	mux.Handle(workcopyRestorePattern, g.workcopyRestoreRoute())
+	mux.Handle(workcopyDiscardPattern, g.workcopyDiscardRoute())
+	mux.Handle(workcopySnapshotPattern, g.workcopySnapshotRoute())
 	return g.wrap(mux)
 }
 

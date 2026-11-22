@@ -1,0 +1,691 @@
+{
+  "$comment": "The one set of working-copy endpoint fixtures (#43). Both toolchains read this file: agent/internal/httpapi/workcopies_fixtures_test.go and packages/schema/src/workcopy-fixtures.test.ts. Never copy it per language. lists are WorkcopyList answers (GET /api/workcopies), reviews WorkcopyReview answers (GET /api/workcopies/review), revisionRequests the apply and discard bodies, snapshotRequests the restore and snapshot removal bodies, reports WorkcopyReport answers, discarded WorkcopyDiscarded answers, removed WorkcopySnapshotRemoved answers, errors WorkcopyError answers. The pairings the schema states in words are held by both tests: a valid fixture keeps them, and each case in pairingViolations passes the schema and breaks one.",
+  "lists": {
+    "valid": [
+      {
+        "name": "empty",
+        "why": "No working copies.",
+        "body": {
+          "copies": [],
+          "unreadable": 0
+        }
+      },
+      {
+        "name": "one-available-one-gone",
+        "why": "One working copy whose pipeline is listed and one whose root is unavailable, and one store that was moved aside.",
+        "body": {
+          "copies": [
+            {
+              "root": "/home/user/code",
+              "directory": "orders",
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "files": 2,
+              "available": true
+            },
+            {
+              "root": "/home/user/gone",
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "files": 1,
+              "available": false,
+              "reason": "rootUnavailable",
+              "rootReason": "notFound"
+            }
+          ],
+          "unreadable": 1
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-unreadable",
+        "why": "unreadable is required.",
+        "body": {
+          "copies": []
+        }
+      },
+      {
+        "name": "zero-files",
+        "why": "A working copy holds at least one file.",
+        "body": {
+          "copies": [
+            {
+              "root": "/r",
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "files": 0,
+              "available": true
+            }
+          ],
+          "unreadable": 0
+        }
+      },
+      {
+        "name": "bad-revision",
+        "why": "A revision is 32 lowercase hex digits.",
+        "body": {
+          "copies": [
+            {
+              "root": "/r",
+              "revision": "XYZ",
+              "files": 1,
+              "available": true
+            }
+          ],
+          "unreadable": 0
+        }
+      }
+    ]
+  },
+  "reviews": {
+    "valid": [
+      {
+        "name": "nothing-staged",
+        "why": "An opened pipeline with nothing staged has no revision.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "files": [],
+          "unreadable": false,
+          "snapshots": []
+        }
+      },
+      {
+        "name": "every-change",
+        "why": "Added, modified with CRLF, deleted, and a drifted file with no texts; one snapshot.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "files": [
+            {
+              "path": "pipeline.yaml",
+              "change": "modified",
+              "state": "ready",
+              "baseText": "id: orders\n",
+              "stagedText": "id: orders\nname: Orders\n"
+            },
+            {
+              "path": "src/empty.py",
+              "change": "added",
+              "state": "ready",
+              "stagedText": ""
+            },
+            {
+              "path": "src/main.py",
+              "change": "modified",
+              "state": "ready",
+              "baseText": "a\r\nb\r\n",
+              "stagedText": "a\r\nb"
+            },
+            {
+              "path": "src/old.py",
+              "change": "deleted",
+              "state": "ready",
+              "baseText": "old\n"
+            },
+            {
+              "path": "src/x.bin",
+              "change": "modified",
+              "state": "notText"
+            }
+          ],
+          "unreadable": false,
+          "snapshots": [
+            {
+              "id": "20261122T101500Z-0a1b2c3d",
+              "taken": "2026-11-22T10:15:00Z",
+              "paths": ["src/main.py"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "unreadable-store",
+        "why": "The stored working copy could not be read.",
+        "body": {
+          "root": "/home/user/orders",
+          "files": [],
+          "unreadable": true,
+          "snapshots": []
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "unknown-state",
+        "why": "state is one of the listed values.",
+        "body": {
+          "root": "/r",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "files": [
+            {
+              "path": "a",
+              "change": "added",
+              "state": "weird"
+            }
+          ],
+          "unreadable": false,
+          "snapshots": []
+        }
+      },
+      {
+        "name": "bad-path",
+        "why": "A staged path follows the source path pattern.",
+        "body": {
+          "root": "/r",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "files": [
+            {
+              "path": "/etc/passwd",
+              "change": "added",
+              "state": "ready",
+              "stagedText": ""
+            }
+          ],
+          "unreadable": false,
+          "snapshots": []
+        }
+      },
+      {
+        "name": "bad-snapshot-id",
+        "why": "A snapshot id is a UTC second and eight hex digits.",
+        "body": {
+          "root": "/r",
+          "files": [],
+          "unreadable": false,
+          "snapshots": [
+            {
+              "id": "x",
+              "taken": "2026-11-22T10:15:00Z",
+              "paths": ["a"]
+            }
+          ]
+        }
+      },
+      {
+        "name": "missing-snapshots",
+        "why": "snapshots is required.",
+        "body": {
+          "root": "/r",
+          "files": [],
+          "unreadable": false
+        }
+      }
+    ]
+  },
+  "revisionRequests": {
+    "valid": [
+      {
+        "name": "in-a-directory",
+        "why": "Apply or discard a pipeline in a directory.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "root-pipeline",
+        "why": "A root that is the pipeline sends no directory.",
+        "body": {
+          "root": "/home/user/orders",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-revision",
+        "why": "revision is required.",
+        "body": {
+          "root": "/r"
+        }
+      },
+      {
+        "name": "empty-directory",
+        "why": "An empty directory is refused; leave it out.",
+        "body": {
+          "root": "/r",
+          "directory": "",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "extra-field",
+        "why": "Nothing else is taken.",
+        "body": {
+          "root": "/r",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "force": true
+        }
+      }
+    ]
+  },
+  "snapshotRequests": {
+    "valid": [
+      {
+        "name": "restore",
+        "why": "Restore or remove one snapshot.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "snapshot": "20261122T101500Z-0a1b2c3d"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "path-as-id",
+        "why": "A snapshot id is never a path.",
+        "body": {
+          "root": "/r",
+          "snapshot": "../../x"
+        }
+      }
+    ]
+  },
+  "reports": {
+    "valid": [
+      {
+        "name": "complete",
+        "why": "Every path written.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "snapshot": "20261122T101500Z-0a1b2c3d",
+          "complete": true,
+          "files": [
+            {
+              "path": "src/a.py",
+              "result": "written"
+            },
+            {
+              "path": "src/b.py",
+              "result": "written"
+            }
+          ]
+        }
+      },
+      {
+        "name": "partway",
+        "why": "The second write failed; the third was not written.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "snapshot": "20261122T101500Z-0a1b2c3d",
+          "complete": false,
+          "files": [
+            {
+              "path": "src/a.py",
+              "result": "written"
+            },
+            {
+              "path": "src/b.py",
+              "result": "failed",
+              "kind": "io"
+            },
+            {
+              "path": "src/c.py",
+              "result": "notWritten"
+            }
+          ]
+        }
+      },
+      {
+        "name": "restore",
+        "why": "A restore with a file the apply never wrote.",
+        "body": {
+          "root": "/home/user/orders",
+          "snapshot": "20261122T101500Z-0a1b2c3d",
+          "complete": true,
+          "files": [
+            {
+              "path": "src/a.py",
+              "result": "written"
+            },
+            {
+              "path": "src/b.py",
+              "result": "unchanged"
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-files",
+        "why": "A report names at least one path.",
+        "body": {
+          "root": "/r",
+          "snapshot": "20261122T101500Z-0a1b2c3d",
+          "complete": true,
+          "files": []
+        }
+      },
+      {
+        "name": "unknown-result",
+        "why": "result is one of the listed values.",
+        "body": {
+          "root": "/r",
+          "snapshot": "20261122T101500Z-0a1b2c3d",
+          "complete": true,
+          "files": [
+            {
+              "path": "a",
+              "result": "maybe"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "discarded": {
+    "valid": [
+      {
+        "name": "three",
+        "why": "Three staged files discarded.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "discarded": 3
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "zero",
+        "why": "A discard removes at least one file.",
+        "body": {
+          "root": "/r",
+          "discarded": 0
+        }
+      }
+    ]
+  },
+  "removed": {
+    "valid": [
+      {
+        "name": "one",
+        "why": "One snapshot removed.",
+        "body": {
+          "root": "/home/user/code",
+          "snapshot": "20261122T101500Z-0a1b2c3d"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-snapshot",
+        "why": "snapshot is required.",
+        "body": {
+          "root": "/r"
+        }
+      }
+    ]
+  },
+  "errors": {
+    "valid": [
+      {
+        "name": "changed",
+        "why": "The review is out of date.",
+        "body": {
+          "error": "changed",
+          "message": "what is staged changed since the review was drawn, or a directory on the way changed, so nothing was written; look at the review again"
+        }
+      },
+      {
+        "name": "drift",
+        "why": "Every differing file is listed.",
+        "body": {
+          "error": "drift",
+          "message": "some project files are not what was staged from, so nothing was written",
+          "drift": [
+            {
+              "path": "src/a.py",
+              "now": "changed"
+            },
+            {
+              "path": "src/b.py",
+              "now": "link"
+            }
+          ]
+        }
+      },
+      {
+        "name": "root-unavailable",
+        "why": "A root that is gone says why.",
+        "body": {
+          "error": "rootUnavailable",
+          "message": "this project directory is unavailable, so nothing was written",
+          "reason": "notFound"
+        }
+      },
+      {
+        "name": "unavailable",
+        "why": "No config directory.",
+        "body": {
+          "error": "unavailable",
+          "message": "the agent has no config directory, so it keeps no staged changes and applies none"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "unknown-kind",
+        "why": "error is one of the listed kinds.",
+        "body": {
+          "error": "nope",
+          "message": "x"
+        }
+      },
+      {
+        "name": "unknown-drift-state",
+        "why": "A drift's now is one of the listed states.",
+        "body": {
+          "error": "drift",
+          "message": "x",
+          "drift": [
+            {
+              "path": "a",
+              "now": "fine"
+            }
+          ]
+        }
+      },
+      {
+        "name": "no-message",
+        "why": "message is required.",
+        "body": {
+          "error": "io"
+        }
+      }
+    ]
+  },
+  "pairingViolations": {
+    "lists": [
+      {
+        "name": "reason-while-available",
+        "why": "reason is present only when not available.",
+        "body": {
+          "copies": [
+            {
+              "root": "/r",
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "files": 1,
+              "available": true,
+              "reason": "notFound"
+            }
+          ],
+          "unreadable": 0
+        }
+      },
+      {
+        "name": "root-reason-without-root-unavailable",
+        "why": "rootReason only with rootUnavailable.",
+        "body": {
+          "copies": [
+            {
+              "root": "/r",
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "files": 1,
+              "available": false,
+              "reason": "notFound",
+              "rootReason": "notFound"
+            }
+          ],
+          "unreadable": 0
+        }
+      }
+    ],
+    "reviews": [
+      {
+        "name": "revision-with-no-files",
+        "why": "revision is present exactly when files is not empty.",
+        "body": {
+          "root": "/r",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "files": [],
+          "unreadable": false,
+          "snapshots": []
+        }
+      },
+      {
+        "name": "text-on-drift",
+        "why": "Texts only when ready.",
+        "body": {
+          "root": "/r",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "files": [
+            {
+              "path": "a",
+              "change": "modified",
+              "state": "changed",
+              "baseText": "x",
+              "stagedText": "y"
+            }
+          ],
+          "unreadable": false,
+          "snapshots": []
+        }
+      },
+      {
+        "name": "deleted-with-staged-text",
+        "why": "A deletion has no staged text.",
+        "body": {
+          "root": "/r",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "files": [
+            {
+              "path": "a",
+              "change": "deleted",
+              "state": "ready",
+              "baseText": "x",
+              "stagedText": ""
+            }
+          ],
+          "unreadable": false,
+          "snapshots": []
+        }
+      },
+      {
+        "name": "added-with-base",
+        "why": "An added file has no base.",
+        "body": {
+          "root": "/r",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "files": [
+            {
+              "path": "a",
+              "change": "added",
+              "state": "ready",
+              "baseText": "x",
+              "stagedText": "y"
+            }
+          ],
+          "unreadable": false,
+          "snapshots": []
+        }
+      }
+    ],
+    "reports": [
+      {
+        "name": "complete-with-a-failure",
+        "why": "complete is false when a path failed.",
+        "body": {
+          "root": "/r",
+          "snapshot": "20261122T101500Z-0a1b2c3d",
+          "complete": true,
+          "files": [
+            {
+              "path": "a",
+              "result": "failed",
+              "kind": "io"
+            }
+          ]
+        }
+      },
+      {
+        "name": "kind-without-failure",
+        "why": "kind only when failed.",
+        "body": {
+          "root": "/r",
+          "snapshot": "20261122T101500Z-0a1b2c3d",
+          "complete": true,
+          "files": [
+            {
+              "path": "a",
+              "result": "written",
+              "kind": "io"
+            }
+          ]
+        }
+      }
+    ],
+    "errors": [
+      {
+        "name": "drift-without-list",
+        "why": "drift is present exactly when error is drift.",
+        "body": {
+          "error": "drift",
+          "message": "x"
+        }
+      },
+      {
+        "name": "reason-without-root-unavailable",
+        "why": "reason only with rootUnavailable.",
+        "body": {
+          "error": "changed",
+          "message": "x",
+          "reason": "notFound"
+        }
+      },
+      {
+        "name": "list-without-drift",
+        "why": "drift only with drift.",
+        "body": {
+          "error": "changed",
+          "message": "x",
+          "drift": [
+            {
+              "path": "a",
+              "now": "changed"
+            }
+          ]
+        }
+      },
+      {
+        "name": "ready-drift",
+        "why": "A drifted file is never ready.",
+        "body": {
+          "error": "drift",
+          "message": "x",
+          "drift": [
+            {
+              "path": "a",
+              "now": "ready"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

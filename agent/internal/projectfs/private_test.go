@@ -163,3 +163,134 @@ func TestAnUnreadablePrivateFileThatCannotBeMovedAsideIsNeverWrittenOver(t *test
 		t.Fatal("gone")
 	}
 }
+
+// PrivateTree (#43): a directory of the agent's own beside the roots store.
+
+func TestAPrivateTreeIsBesideTheRootsStoreOwnerOnlyAndNoRootMayHoldIt(t *testing.T) {
+	t.Parallel()
+	f := newRootsFixture(t)
+	mustMkdirAll(t, filepath.Dir(f.store))
+	if err := os.Chmod(filepath.Dir(f.store), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := OpenPrivateTree(f.roots, "workcopies")
+	if err != nil || tree == nil {
+		t.Fatalf("PrivateTree = %v, %v", tree, err)
+	}
+	if names, err := tree.Names(); err != nil || len(names) != 0 {
+		t.Fatalf("a tree not made yet lists %v, %v", names, err)
+	}
+	file, err := tree.File("copy-a.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Write([]byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(filepath.Dir(f.store), "workcopies")
+	for path, want := range map[string]os.FileMode{dir: 0o700, filepath.Dir(f.store): 0o700, filepath.Join(dir, "copy-a.json"): 0o600} {
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != want {
+			t.Fatalf("%s: mode %v, %v; want %v", path, info, err, want)
+		}
+	}
+	raw, found, problem := file.Read()
+	if string(raw) != "{}\n" || !found || problem != "" {
+		t.Fatalf("Read = %q %v %q", raw, found, problem)
+	}
+	for _, holder := range []string{dir, filepath.Dir(dir)} {
+		_, err := f.roots.Authorize(holder)
+		_ = refusedAs(t, err, KindForbidden, "a directory holding the private tree")
+	}
+}
+
+func TestAPrivateTreeListsItsFilesAndNotTheMovedAsideOrTemporaryOnes(t *testing.T) {
+	t.Parallel()
+	f := newRootsFixture(t)
+	tree, err := OpenPrivateTree(f.roots, "workcopies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"b.json", "a.json"} {
+		file, err := tree.File(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := filepath.Join(filepath.Dir(f.store), "workcopies")
+	mustWriteFile(t, filepath.Join(dir, ".a.json.tmp-1"), "")
+	mustWriteFile(t, filepath.Join(dir, "c.json.corrupt-20260101T000000Z"), "")
+	mustMkdirAll(t, filepath.Join(dir, "sub"))
+	names, err := tree.Names()
+	if err != nil || strings.Join(names, ",") != "a.json,b.json" {
+		t.Fatalf("Names = %v, %v", names, err)
+	}
+	if err := tree.Remove("a.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Remove("a.json"); err != nil {
+		t.Fatalf("removing a file that is not there: %v", err)
+	}
+	if names, _ := tree.Names(); strings.Join(names, ",") != "b.json" {
+		t.Fatalf("after Remove: %v", names)
+	}
+}
+
+func TestAPrivateTreeFileThatCannotBeUsedIsMovedAside(t *testing.T) {
+	t.Parallel()
+	f := newRootsFixture(t)
+	tree, err := OpenPrivateTree(f.roots, "workcopies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := tree.File("a.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Write([]byte("not json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.SetAside(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(filepath.Dir(f.store), "workcopies")
+	moved, _ := filepath.Glob(filepath.Join(dir, "a.json.corrupt-*"))
+	if len(moved) != 1 {
+		t.Fatalf("moved aside: %v", moved)
+	}
+	if names, _ := tree.Names(); len(names) != 0 {
+		t.Fatalf("a moved-aside file is listed: %v", names)
+	}
+}
+
+func TestAPrivateTreeAndItsFilesArePlainNames(t *testing.T) {
+	t.Parallel()
+	f := newRootsFixture(t)
+	for _, name := range []string{"", ".", "..", "a/b", "../x", ".hidden", "a\x00b", "roots.json"} {
+		if tree, err := OpenPrivateTree(f.roots, name); tree != nil || KindOf(err) != KindInvalid {
+			t.Errorf("OpenPrivateTree(%q) = %v, %v", name, tree, err)
+		}
+	}
+	tree, err := OpenPrivateTree(f.roots, "workcopies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"", ".", "..", "a/b", "../x", "/etc/passwd", ".hidden", "a.json.corrupt-1"} {
+		if file, err := tree.File(name); file != nil || KindOf(err) != KindInvalid {
+			t.Errorf("File(%q) = %v, %v", name, file, err)
+		}
+		if err := tree.Remove(name); KindOf(err) != KindInvalid {
+			t.Errorf("Remove(%q) = %v", name, err)
+		}
+	}
+	roots, err := OpenRoots(f.browser, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree, err := OpenPrivateTree(roots, "workcopies"); tree != nil || err != nil {
+		t.Fatalf("a tree without a store = %v, %v", tree, err)
+	}
+}

@@ -735,7 +735,8 @@ func TestNewHandlerRegistersTheTableAndTheChannelAndNothingElse(t *testing.T) {
 	// in roots_test.go. The three pipeline patterns are #48's, held to it in
 	// pipelines_test.go. The five connection patterns are #24's, held to it
 	// in connections_test.go. The two source patterns are #87's, held to it
-	// in sources_test.go.
+	// in sources_test.go. The six working-copy patterns are #43's, held to it
+	// in workcopies_test.go.
 	want := map[string]bool{
 		"r.pattern": true, "channelPattern": true, "directoriesPattern": true,
 		"rootsListPattern": true, "rootsAuthorizePattern": true, "rootsRevokePattern": true,
@@ -743,6 +744,8 @@ func TestNewHandlerRegistersTheTableAndTheChannelAndNothingElse(t *testing.T) {
 		"connectionsListPattern": true, "connectionsNamesPattern": true, "connectionsCreatePattern": true,
 		"connectionsUpdatePattern": true, "connectionsDeletePattern": true,
 		"sourceReadPattern": true, "sourceWritePattern": true,
+		"workcopiesListPattern": true, "workcopyReviewPattern": true, "workcopyApplyPattern": true,
+		"workcopyRestorePattern": true, "workcopyDiscardPattern": true, "workcopySnapshotPattern": true,
 	}
 	if len(registered) != len(want) {
 		t.Fatalf("newHandler registers %v; this test and the rejection table above know about %v, so one of them needs updating", registered, want)

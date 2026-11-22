@@ -567,3 +567,48 @@ describe('the code panel in both schemes', () => {
     });
   }
 });
+
+describe('a custom-code node whose file has staged changes (#43)', () => {
+  const view = codeView(
+    where,
+    readFile('func ApplyDiscounts() {}\n'),
+    'go',
+    null,
+  );
+  const actions = {
+    onChange: () => undefined,
+    onSave: () => undefined,
+    onReload: () => undefined,
+  };
+
+  it('says so in the fixed sentence, with a control that opens the review', () => {
+    const html = renderToStaticMarkup(
+      <CustomCodeNode
+        block={step}
+        code={view}
+        actions={{
+          ...actions,
+          stagedPaths: ['src/discounts.go'],
+          onReview: () => undefined,
+        }}
+      />,
+    );
+    expect(html).toContain(codeWords.staged);
+    expect(codeWords.staged).toBe(
+      'This file has staged changes waiting for review',
+    );
+    expect(html).toContain('Review staged changes');
+  });
+
+  it('says nothing for a file with nothing staged', () => {
+    const html = renderToStaticMarkup(
+      <CustomCodeNode
+        block={step}
+        code={view}
+        actions={{ ...actions, stagedPaths: ['src/other.go'] }}
+      />,
+    );
+    expect(html).not.toContain(codeWords.staged);
+    expect(html).not.toContain('Review staged changes');
+  });
+});

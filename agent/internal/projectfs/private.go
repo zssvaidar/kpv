@@ -1,6 +1,9 @@
 package projectfs
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -72,6 +75,109 @@ func (p *PrivateFile) Write(body []byte) error {
 	defer p.mutex.Unlock()
 	if err := p.file.write(body); err != nil {
 		return &PathError{Op: "store", Kind: KindIO, Message: "the private file could not be written"}
+	}
+	return nil
+}
+
+// MaxPrivateTreeFile is the most bytes a file of a PrivateTree holds; a
+// larger one is corrupt and is moved aside rather than read.
+const MaxPrivateTreeFile = 64 << 20
+
+// PrivateTree is a directory of the agent's own beside the roots store
+// (os.UserConfigDir()/kpv/<name>/, handed out by OpenPrivateTree), holding
+// flat files for state that must never be inside a project: the working
+// copies and snapshots of internal/workcopy (#43). Being inside the store's
+// directory is what keeps it outside every root, by the same rule as
+// PrivateFile: a directory holding the store cannot be authorized.
+//
+// The tree is made 0700, and so is the store directory above it, on every
+// write whatever the umask; its files are written atomically as 0600. Each
+// file is a PrivateFile with the same read, move-aside to
+// <name>.corrupt-<UTC time> and atomic write, and at most MaxPrivateTreeFile
+// bytes. It hands back names and bytes, never a path or a handle. Its owner
+// serializes what it does with the files.
+type PrivateTree struct {
+	mutex sync.Mutex
+	dir   string
+	real  string
+}
+
+// OpenPrivateTree returns the directory called name beside roots' store, or
+// nil when the roots have no store. name is one plain name, not the roots
+// store's own; anything else is KindInvalid. Nothing is made until the first
+// write. It is a function and not a method of Roots for the reason
+// OpenPrivateFile gives.
+func OpenPrivateTree(r *Roots, name string) (*PrivateTree, error) {
+	if r == nil {
+		return nil, &PathError{Op: "store", Kind: KindInvalid, Message: "a private tree needs the roots it sits beside"}
+	}
+	if !plainPrivateName(name) {
+		return nil, &PathError{Op: "store", Kind: KindInvalid, Message: "a private tree is one plain name"}
+	}
+	if r.store == nil {
+		return nil, nil
+	}
+	if name == filepath.Base(r.store.file) {
+		return nil, &PathError{Op: "store", Kind: KindInvalid, Message: "the roots store is not handed out"}
+	}
+	return &PrivateTree{dir: filepath.Join(filepath.Dir(r.store.file), name), real: filepath.Join(r.store.real, name)}, nil
+}
+
+// plainPrivateName is one file name that is not hidden: no separator, no
+// NUL, not "." or "..".
+func plainPrivateName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\\x00") && !strings.HasPrefix(name, ".")
+}
+
+// File returns the file called name in the tree. name is one plain name that
+// is not a moved-aside one (holding ".corrupt-"); anything else is
+// KindInvalid.
+func (t *PrivateTree) File(name string) (*PrivateFile, error) {
+	if !plainPrivateName(name) || strings.Contains(name, corruptMarker) {
+		return nil, &PathError{Op: "store", Kind: KindInvalid, Message: "a private file is one plain name"}
+	}
+	file := &privateFile{file: filepath.Join(t.dir, name), real: t.real, limit: MaxPrivateTreeFile, inTree: true}
+	return &PrivateFile{file: file}, nil
+}
+
+// corruptMarker is in the name a file is moved aside to.
+const corruptMarker = ".corrupt-"
+
+// Names is the name of every file in the tree, sorted, leaving out hidden
+// names (the temporary files of a write) and files moved aside. A tree not
+// made yet has none. Its error is KindIO and names no path.
+func (t *PrivateTree) Names() ([]string, error) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	entries, err := os.ReadDir(t.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, &PathError{Op: "store", Kind: KindIO, Message: "the private tree could not be listed"}
+	}
+	names := []string{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !plainPrivateName(name) || strings.Contains(name, corruptMarker) || !entry.Type().IsRegular() {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// Remove removes the file called name from the tree; one that is not there
+// is no error. Its error is KindInvalid for a name File refuses, KindIO
+// otherwise, and names no path.
+func (t *PrivateTree) Remove(name string) error {
+	if !plainPrivateName(name) || strings.Contains(name, corruptMarker) {
+		return &PathError{Op: "store", Kind: KindInvalid, Message: "a private file is one plain name"}
+	}
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if err := os.Remove(filepath.Join(t.dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return &PathError{Op: "store", Kind: KindIO, Message: "the private file could not be removed"}
 	}
 	return nil
 }

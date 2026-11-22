@@ -51,6 +51,14 @@ import type {
   SourceFile,
   SourceWriteRequest,
   SourceWritten,
+  WorkcopyDiscarded,
+  WorkcopyError,
+  WorkcopyList,
+  WorkcopyReport,
+  WorkcopyReview,
+  WorkcopyRevisionRequest,
+  WorkcopySnapshotRemoved,
+  WorkcopySnapshotRequest,
 } from '@kpv/schema';
 import {
   authorizedRootSchema,
@@ -68,6 +76,12 @@ import {
   sourceErrorSchema,
   sourceFileSchema,
   sourceWrittenSchema,
+  workcopyDiscardedSchema,
+  workcopyErrorSchema,
+  workcopyListSchema,
+  workcopyReportSchema,
+  workcopyReviewSchema,
+  workcopySnapshotRemovedSchema,
 } from '@kpv/schema';
 
 /**
@@ -135,6 +149,16 @@ export type SourceWrite = SourceLocation &
     | { expectedSha256: string; expectedAbsent?: never }
     | { expectedAbsent: true; expectedSha256?: never }
   );
+
+/** Apply or discard (#43): the pipeline and the revision the review had. */
+export interface WorkcopyRevision extends PipelineLocation {
+  revision: string;
+}
+
+/** Restore or remove a snapshot (#43): the pipeline and the snapshot. */
+export interface WorkcopySnapshot extends PipelineLocation {
+  snapshot: string;
+}
 
 /** The agent's API, as the page sees it. */
 export interface AgentClient {
@@ -237,6 +261,43 @@ export interface AgentClient {
   deleteConnection(
     request: ConnectionDelete,
   ): Promise<AgentResult<ConnectionList, ConnectionsError>>;
+  /**
+   * Every working copy the tool has staged changes in, with whether its
+   * pipeline is still listed: `GET /api/workcopies` (#43). Nothing here
+   * stages; only the tool does, in the agent.
+   */
+  listWorkcopies(): Promise<AgentResult<WorkcopyList, WorkcopyError>>;
+  /**
+   * What is staged for one listed pipeline, each file with the project file
+   * as it is now, and its snapshots: `GET /api/workcopies/review` (#43).
+   */
+  reviewWorkcopy(
+    location: PipelineLocation,
+  ): Promise<AgentResult<WorkcopyReview, WorkcopyError>>;
+  /**
+   * Applies what the review with this revision showed:
+   * `POST /api/workcopies/apply` (#43). Sent only when the person activates
+   * apply. `changed` means the review is out of date and nothing was
+   * written; `drift` lists every file that differs, with nothing written.
+   */
+  applyWorkcopy(
+    request: WorkcopyRevision,
+  ): Promise<AgentResult<WorkcopyReport, WorkcopyError>>;
+  /** Puts a snapshot back: `POST /api/workcopies/restore` (#43). */
+  restoreSnapshot(
+    request: WorkcopySnapshot,
+  ): Promise<AgentResult<WorkcopyReport, WorkcopyError>>;
+  /**
+   * Removes the working copy: `POST /api/workcopies/discard` (#43). The
+   * project is not touched.
+   */
+  discardWorkcopy(
+    request: WorkcopyRevision,
+  ): Promise<AgentResult<WorkcopyDiscarded, WorkcopyError>>;
+  /** Removes one snapshot: `DELETE /api/workcopies/snapshot` (#43). */
+  removeSnapshot(
+    request: WorkcopySnapshot,
+  ): Promise<AgentResult<WorkcopySnapshotRemoved, WorkcopyError>>;
   /** Opens the push channel: `GET /api/channel` (#5), the token in the URL. */
   openChannel(): WebSocket;
 }
@@ -482,6 +543,62 @@ export function createAgentClient(
       );
     },
 
+    listWorkcopies() {
+      return call('/api/workcopies', workcopyListParser, workcopyErrorParser);
+    },
+
+    reviewWorkcopy(location) {
+      const params = new URLSearchParams({ root: location.root });
+      if (location.directory !== undefined) {
+        params.set('directory', location.directory);
+      }
+      return call(
+        `/api/workcopies/review?${params.toString()}`,
+        workcopyReviewParser,
+        workcopyErrorParser,
+      );
+    },
+
+    applyWorkcopy(request) {
+      return call(
+        '/api/workcopies/apply',
+        workcopyReportParser,
+        workcopyErrorParser,
+        'POST',
+        revisionBody(request),
+      );
+    },
+
+    restoreSnapshot(request) {
+      return call(
+        '/api/workcopies/restore',
+        workcopyReportParser,
+        workcopyErrorParser,
+        'POST',
+        snapshotBody(request),
+      );
+    },
+
+    discardWorkcopy(request) {
+      return call(
+        '/api/workcopies/discard',
+        workcopyDiscardedParser,
+        workcopyErrorParser,
+        'POST',
+        revisionBody(request),
+      );
+    },
+
+    removeSnapshot(request) {
+      return call(
+        '/api/workcopies/snapshot',
+        workcopySnapshotRemovedParser,
+        workcopyErrorParser,
+        'DELETE',
+        snapshotBody(request),
+      );
+    },
+
     openChannel() {
       const url = new URL('/api/channel', environment.origin);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -538,6 +655,40 @@ const sourceWrittenParser =
   sourceWrittenSchema as unknown as Parser<SourceWritten>;
 const sourceErrorParser = sourceErrorSchema as unknown as Parser<SourceError>;
 
+// The working-copy answers likewise, from schema/workcopy.schema.json: a
+// location's directory, a review's revision, a file's texts and an error's
+// details are optional.
+const workcopyListParser =
+  workcopyListSchema as unknown as Parser<WorkcopyList>;
+const workcopyReviewParser =
+  workcopyReviewSchema as unknown as Parser<WorkcopyReview>;
+const workcopyReportParser =
+  workcopyReportSchema as unknown as Parser<WorkcopyReport>;
+const workcopyDiscardedParser =
+  workcopyDiscardedSchema as unknown as Parser<WorkcopyDiscarded>;
+const workcopySnapshotRemovedParser =
+  workcopySnapshotRemovedSchema as unknown as Parser<WorkcopySnapshotRemoved>;
+const workcopyErrorParser =
+  workcopyErrorSchema as unknown as Parser<WorkcopyError>;
+
+const revisionBody = (request: WorkcopyRevision): WorkcopyRevisionRequest =>
+  request.directory === undefined
+    ? { root: request.root, revision: request.revision }
+    : {
+        root: request.root,
+        directory: request.directory,
+        revision: request.revision,
+      };
+
+const snapshotBody = (request: WorkcopySnapshot): WorkcopySnapshotRequest =>
+  request.directory === undefined
+    ? { root: request.root, snapshot: request.snapshot }
+    : {
+        root: request.root,
+        directory: request.directory,
+        snapshot: request.snapshot,
+      };
+
 /**
  * What a request body is: a RootRequest, a CreatePipelineRequest, a
  * connection create, update or delete, or a source file write.
@@ -546,6 +697,8 @@ type RequestBody =
   | { path: string }
   | CreatePipelineRequest
   | SourceWriteRequest
+  | WorkcopyRevisionRequest
+  | WorkcopySnapshotRequest
   | Connection
   | ConnectionUpdate
   | ConnectionDelete;

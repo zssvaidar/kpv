@@ -27,6 +27,7 @@ const generatedPaths = [
   'schema/connection.schema.json',
   'schema/source.schema.json',
   'schema/parser.schema.json',
+  'schema/workcopy.schema.json',
   'packages/schema/src/generated',
   'agent/internal/pipeline/models_gen.go',
   'agent/internal/pipeline/pipeline.schema.json',
@@ -45,6 +46,8 @@ const generatedPaths = [
   'agent/internal/httpapi/source.schema.json',
   'agent/internal/parser/models_gen.go',
   'agent/internal/parser/parser.schema.json',
+  'agent/internal/httpapi/workcopies_models_gen.go',
+  'agent/internal/httpapi/workcopy.schema.json',
 ];
 
 const git = (...args) =>

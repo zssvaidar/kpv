@@ -72,6 +72,12 @@ function setup(probes: AgentResult<null>[]) {
     createConnection: () => Promise.reject(new Error('not used')),
     updateConnection: () => Promise.reject(new Error('not used')),
     deleteConnection: () => Promise.reject(new Error('not used')),
+    listWorkcopies: () => Promise.reject(new Error('not used')),
+    reviewWorkcopy: () => Promise.reject(new Error('not used')),
+    applyWorkcopy: () => Promise.reject(new Error('not used')),
+    restoreSnapshot: () => Promise.reject(new Error('not used')),
+    discardWorkcopy: () => Promise.reject(new Error('not used')),
+    removeSnapshot: () => Promise.reject(new Error('not used')),
     openChannel: () => {
       const socket = new FakeSocket();
       sockets.push(socket);

@@ -156,7 +156,7 @@ func TestThisPackageUsesOnlyTheReadOnlyAndAuthorizationPartsOfProjectfs(t *testi
 	// Written out so the diff shows they are still refused, by name.
 	writes := []string{
 		"projectfs.Guard", "projectfs.Path", "projectfs.New", "projectfs.NewBrowser", "projectfs.OpenRoots",
-		"projectfs.OpenPrivateFile", "projectfs.PrivateFile",
+		"projectfs.OpenPrivateFile", "projectfs.PrivateFile", "projectfs.OpenPrivateTree", "projectfs.PrivateTree",
 	}
 	used := map[string]bool{}
 	for name, file := range files {

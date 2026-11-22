@@ -32,6 +32,7 @@ import (
 	"github.com/zssvaidar/kpv/agent/internal/channel"
 	"github.com/zssvaidar/kpv/agent/internal/connections"
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
+	"github.com/zssvaidar/kpv/agent/internal/workcopy"
 )
 
 // loopbackHost is the only address the agent binds. It is IPv4 loopback
@@ -95,6 +96,11 @@ type Options struct {
 	// caller owns it. A nil Connections serves none of those routes, and they
 	// answer the uniform rejection.
 	Connections *connections.Store
+	// Workcopies is what the working-copy endpoints list, review, apply,
+	// restore and discard through (#43), built over the same catalog. The
+	// caller owns it. A nil Workcopies serves none of those routes, and they
+	// answer the uniform rejection.
+	Workcopies *workcopy.Store
 }
 
 // Server is the agent's local HTTP API, bound and ready to serve.
@@ -155,7 +161,7 @@ func New(options Options) (*Server, error) {
 	channelOptions.AllowedOrigins = origins.origins()
 	hub := channel.New(channelOptions)
 
-	g := &guard{token: token, origins: origins, logger: logger, channel: hub, browser: options.Browser, roots: options.Roots, pipelines: options.Pipelines, connections: options.Connections}
+	g := &guard{token: token, origins: origins, logger: logger, channel: hub, browser: options.Browser, roots: options.Roots, pipelines: options.Pipelines, connections: options.Connections, workcopies: options.Workcopies}
 	server := &Server{
 		token:    token,
 		listener: listener,
