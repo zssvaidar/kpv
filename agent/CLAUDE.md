@@ -60,10 +60,14 @@ Module-wide, in `internal/projectfs/boundary_test.go`:
   package keeps every ban: no `os/exec`, `syscall`, `golang.org/x/sys`, no
   `os.StartProcess` or other spawning call, and no string literal naming a
   shell or its `-c` flag, which stays banned in `internal/process` too
-  (`internal/process/CLAUDE.md` lists what it may use). A later issue that
-  needs a program adds its entry to `programs.go` and its package, with the
-  reason, to `processImporters` in the boundary test, instead of making a new
-  exception; `internal/httpapi` never imports it
+  (`internal/process/CLAUDE.md` lists what it may use). Names are resolved
+  through each file's imports, and `os`, `os/exec`, `syscall`,
+  `path/filepath`, `io/ioutil` and `io/fs` may not be imported under another
+  name anywhere, which also holds the filesystem test below; a reference is
+  banned whether it is called or not. A later issue that needs a program adds
+  its entry to `programs.go` and its package, with the reason, to
+  `processImporters` in the boundary test, instead of making a new exception;
+  `internal/httpapi` never imports it
 
 ## Startup lines
 

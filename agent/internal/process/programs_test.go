@@ -21,14 +21,11 @@ func shellNames(t *testing.T) map[string]bool {
 	}
 	names := map[string]bool{}
 	ast.Inspect(file, func(node ast.Node) bool {
-		assign, ok := node.(*ast.AssignStmt)
-		if !ok || len(assign.Lhs) != 1 {
+		spec, ok := node.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || spec.Names[0].Name != "bannedLiterals" || len(spec.Values) != 1 {
 			return true
 		}
-		if ident, ok := assign.Lhs[0].(*ast.Ident); !ok || ident.Name != "bannedLiterals" {
-			return true
-		}
-		literal, ok := assign.Rhs[0].(*ast.CompositeLit)
+		literal, ok := spec.Values[0].(*ast.CompositeLit)
 		if !ok {
 			return true
 		}

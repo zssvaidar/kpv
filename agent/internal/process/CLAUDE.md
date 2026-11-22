@@ -6,19 +6,32 @@ comment in `process.go` gives the reasons; these are the rules, and
 
 - only this package's non-test files may import `os/exec` or `syscall`. The
   boundary test allows it, through one `processAllowance` entry with its
-  reason, to import those two and call `exec.CommandContext` and
-  `exec.LookPath`. `exec.Command` without a context, `os.StartProcess`,
-  `syscall.Exec`, `syscall.ForkExec`, `syscall.StartProcess`,
-  `syscall.CreateProcess`, every `golang.org/x/sys` import and every shell or
-  `-c` literal stay banned here too. `exec.CommandContext` is called from one
-  place (`Run`), and the only `syscall` names used are `SysProcAttr`, `Kill`,
-  `SIGKILL`, `Signal` and `WaitStatus`; any other fails the test. The
-  allowance fails as stale if this package stops importing `os/exec`
+  reason, to import those two. Of `os/exec` it may use only
+  `CommandContext`, `LookPath`, `ErrWaitDelay` and `Cmd`, the last only as
+  `*exec.Cmd`, so no `exec.Cmd` literal, `new(exec.Cmd)` or `Cmd` variable can
+  start a process beside the one `exec.CommandContext` reference (`Run`). Of
+  `syscall` it may use only `SysProcAttr`, `Kill`, `SIGKILL`, `Signal` and
+  `WaitStatus`. `exec.Command`, `os.StartProcess`, `syscall.Exec`,
+  `syscall.ForkExec`, `syscall.StartProcess`, `syscall.CreateProcess`, every
+  `golang.org/x/sys` import and every shell or `-c` string stay banned here
+  too. The allowance fails as stale if this package stops importing `os/exec`
+- the boundary test resolves every name through the file's imports, and
+  refuses `os`, `os/exec`, `syscall`, `path/filepath`, `io/ioutil` and `io/fs`
+  imported under any other name (renamed, `.` or `_`) anywhere in the module.
+  A reference is banned, called or not (`var f = os.StartProcess`). A string
+  is compared unquoted (`"\x2dc"` is `-c`) and folded through `+` and string
+  constants (`"s" + "h"`); a string built at run time is not seen, which is
+  why a child's arguments come only from the table.
+  `TestTheCommandScanCatchesEveryPlantedViolation` feeds each of these, and
+  each bypass QA found, to the same scan
 - this package imports no other agent package (`source_test.go`)
 - `Run(ctx, program, stdin)` runs only a `Program`, whose fields are
   unexported. Every non-test `Program` comes from the table in `programs.go`
-  (`Lookup`), which has no entry after #37; a `Program` literal appears only
-  there, in `newProgram` (`source_test.go`). The zero `Program`, the only one
+  (`Lookup`), which has no entry after #37. A `Program` is built only there,
+  in `newProgram`: a `Program` literal, `new(Program)`, a variable declared as
+  a `Program` or an assignment to one of its fields anywhere else in the
+  package fails `TestOnlyProgramsGoBuildsAProgram`, and
+  `TestTheProgramCheckCatchesEveryPlantedBuild` plants each (`source_test.go`). The zero `Program`, the only one
   another package can write, is `invalidProgram` and starts nothing
 - an entry fixes a bare executable name looked up on `PATH`, its whole
   argument list, the environment variable names passed through, a timeout and
