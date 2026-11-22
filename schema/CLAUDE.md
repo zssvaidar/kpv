@@ -17,6 +17,7 @@ new outputs (missed in #48, added in #24).
 | `roots.schema.json`      | `agent/internal/httpapi/roots_models_gen.go`                                                          | `fixtures/roots-responses.json`     | `roots-fixtures.test.ts`, `httpapi/roots_fixtures_test.go`                                            |
 | `pipelines.schema.json`  | `agent/internal/httpapi/pipelines_models_gen.go`                                                      | `fixtures/pipelines-responses.json` | `pipelines-fixtures.test.ts`, `httpapi/pipelines_fixtures_test.go`                                    |
 | `connection.schema.json` | `agent/internal/httpapi/connections_models_gen.go`, and a schema copy in `agent/internal/connections` | `fixtures/connections.json`         | `connection-fixtures.test.ts`, `connections/fixtures_test.go`, `httpapi/connections_fixtures_test.go` |
+| `source.schema.json`     | `agent/internal/httpapi/sources_models_gen.go`                                                        | `fixtures/source-responses.json`    | `source-fixtures.test.ts`, `httpapi/sources_fixtures_test.go`                                         |
 
 The generators are pinned: `go-jsonschema` as a `tool` directive in
 `agent/go.mod`, `json-schema-to-typescript` and `json-schema-to-zod` as root
@@ -76,6 +77,17 @@ What a schema change can break without the change looking wrong
   token into `secrets.Secret` and never uses the two structs
   (`httpapi/source_test.go`); `internal/connections` gets only the schema
   copy, no structs
+- `source.schema.json` (#87) copies two rules: `$defs/sourcePath` is
+  `pipeline.schema.json`'s `customCodeReference.path` (type, length,
+  pattern) and `$defs/sourceRootReason` is `pipelines.schema.json`'s
+  `pipelineRootReason`; generation fails when either differs. The pattern lets
+  `src/../../x` and `src/.env` through, so the segment rules (no empty, `.`,
+  `..` or dot-led segment, no trailing `/`) are the agent's
+  (`catalog/source.go`). Its pairings (a write has exactly one of
+  `expectedSha256` and `expectedAbsent`; an error has `reason` exactly when
+  `rootUnavailable` and `sha256` only when `changed`) are stated in words and
+  held by `source-fixtures.test.ts` and `httpapi/sources_fixtures_test.go`,
+  with `pairingViolations` cases that pass the schema and break one
 - The channel envelope is its own schema because it carries a pipeline id and
   is not a pipeline, and `internal/channel` may not import `internal/pipeline`
   (`agent/CLAUDE.md`)

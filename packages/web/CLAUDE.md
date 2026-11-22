@@ -61,6 +61,11 @@ Rules a change can break
   dangling (or unchecked before any read), and kept on save: a reference
   matches exactly, letter case included (`connectionChoices` in
   `kafka-form.ts`). No connection leaves the key out
+- `client.ts`'s `readSource` and `writeSource` (#87) read and write a
+  pipeline's source file by the listed root and directory and a path inside
+  the pipeline directory, for #14's editor. `SourceWrite` holds by its type
+  that a write has exactly one of `expectedSha256` (the hash the read
+  answered) and `expectedAbsent`; a `changed` error carries the current hash
 - `src/connection/monitor.ts` holds the connection state the status bar shows.
   The channel WebSocket is the liveness signal; on a drop one request says why,
   and it reconnects with backoff (`backoff.ts`: 250ms doubling to 10s) unless

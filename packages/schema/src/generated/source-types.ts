@@ -1,0 +1,133 @@
+// Code generated from schema/source.schema.json by scripts/generate-schema.mjs.
+// DO NOT EDIT. Run `pnpm run generate` instead; CI fails when packages/schema/src/generated/source-types.ts is stale.
+/**
+ * The file's path relative to the pipeline directory, the one holding pipeline.yaml, segments separated by /. The same rule as pipeline.schema.json's customCodeReference path. The agent also refuses an empty, . or .. segment, a segment starting with ., and a trailing /, which this pattern lets through.
+ *
+ * This interface was referenced by `SourceFile`'s JSON-Schema
+ * via the `definition` "sourcePath".
+ */
+export type SourcePath = string;
+/**
+ * The SHA-256 of the file's exact bytes, in lowercase hex.
+ *
+ * This interface was referenced by `SourceFile`'s JSON-Schema
+ * via the `definition` "sourceSha256".
+ */
+export type SourceSha256 = string;
+/**
+ * The SHA-256 of the file's exact bytes, in lowercase hex.
+ */
+export type SourceSha2561 = string;
+/**
+ * Why the root is unavailable, present exactly when error is rootUnavailable. The same values, with the same meaning, as pipelines.schema.json's PipelineRootReason, which GET /api/pipelines/open answers.
+ *
+ * This interface was referenced by `SourceFile`'s JSON-Schema
+ * via the `definition` "sourceRootReason".
+ */
+export type SourceRootReason =
+  | 'notFound'
+  | 'notDirectory'
+  | 'unreadable'
+  | 'forbidden'
+  | 'tooBroad'
+  | 'changed'
+  | 'overlaps'
+  | 'io';
+/**
+ * Why a source request failed; a client branches on this, not on the message. invalid: the request is not well formed, or the path is not a single relative path inside the pipeline directory (an empty, . or .. segment, a segment starting with ., a backslash, a NUL, a trailing /, or anything the path pattern refuses). notAuthorized: the root is not an authorized project root, or was revoked. rootUnavailable: the root is stored but unavailable, which reason says why. notFound: there is no listed pipeline at that root and directory, the file is not there, or a write with expectedSha256 finds no file. reserved: the path is the pipeline's own pipeline.yaml. generated: a write to a path under generated/, which belongs to the tool. link: the pipeline directory, a directory on the path or the file is a symbolic link, which is never followed. changed: a directory on the path changed while it was being opened, or the file no longer has expectedSha256 (sha256 then says what it has); nothing was written. exists: a write with expectedAbsent finds the file there. notRegularFile: the path names a directory, FIFO, socket or device. tooLarge: the file or the text is over 1 MiB. notText: the bytes are not UTF-8 or hold a NUL. unreadable: the agent may not read or search the file or a directory on its path. io: anything else.
+ *
+ * This interface was referenced by `SourceFile`'s JSON-Schema
+ * via the `definition` "sourceErrorKind".
+ */
+export type SourceErrorKind =
+  | 'invalid'
+  | 'notAuthorized'
+  | 'rootUnavailable'
+  | 'notFound'
+  | 'reserved'
+  | 'generated'
+  | 'link'
+  | 'changed'
+  | 'exists'
+  | 'notRegularFile'
+  | 'tooLarge'
+  | 'notText'
+  | 'unreadable'
+  | 'io';
+
+/**
+ * One source file of a pipeline, as the agent's source endpoints answer it (#87): GET /api/pipelines/source?root=<root>&directory=<directory>&path=<path> answers a SourceFile, and PUT /api/pipelines/source takes a SourceWriteRequest and answers a SourceWritten. A request that could not be served is answered with a SourceError instead. The pipeline is addressed by its root and directory as GET /api/pipelines/open takes them, and the file by its path inside the pipeline directory, the one holding pipeline.yaml. This file is the single source of truth for every request and response shape of those routes; the Go structs in the agent and the TypeScript types and Zod schemas in @kpv/schema are generated from it and must never be hand-edited.
+ */
+export interface SourceFile {
+  /**
+   * The root the pipeline is in, as listed.
+   */
+  root: string;
+  /**
+   * The pipeline's directory inside the root. Absent when the root itself is the pipeline.
+   */
+  directory?: string;
+  path: SourcePath;
+  /**
+   * The file's text exactly as it is on disk: no line ending, byte order mark or trailing newline is added, removed or changed. The file is UTF-8 with no NUL and at most 1 MiB.
+   */
+  text: string;
+  sha256: SourceSha256;
+  /**
+   * True when the path's first segment is generated (compared ignoring letter case): the file belongs to the tool, is rewritten by every generation, and a write to it is refused.
+   */
+  generated: boolean;
+}
+/**
+ * The body of PUT /api/pipelines/source. It is sent as Content-Type: application/json, carries each field at most once, spelled exactly so, and carries exactly one of expectedSha256 and expectedAbsent. The text is at most 1 MiB as UTF-8 (more is tooLarge), and the body at most six times that, the most JSON escaping can make of it, plus 16384 bytes for the other fields.
+ *
+ * This interface was referenced by `SourceFile`'s JSON-Schema
+ * via the `definition` "sourceWriteRequest".
+ */
+export interface SourceWriteRequest {
+  /**
+   * The root the pipeline is in, as listed.
+   */
+  root: string;
+  /**
+   * The pipeline's directory inside the root. Absent when the root itself is the pipeline.
+   */
+  directory?: string;
+  path: SourcePath;
+  /**
+   * The file's new text; its UTF-8 bytes are written exactly. It may not hold a NUL.
+   */
+  text: string;
+  expectedSha256?: SourceSha2561;
+  /**
+   * Sent instead of expectedSha256 to create a file that does not exist yet. When it exists, nothing is written and the answer is exists.
+   */
+  expectedAbsent?: true;
+}
+/**
+ * The answer to a successful PUT /api/pipelines/source: the file it wrote and the SHA-256 of the bytes written, which the next write sends as expectedSha256.
+ *
+ * This interface was referenced by `SourceFile`'s JSON-Schema
+ * via the `definition` "sourceWritten".
+ */
+export interface SourceWritten {
+  root: string;
+  directory?: string;
+  path: SourcePath;
+  sha256: SourceSha256;
+}
+/**
+ * The answer to a source request that could not be served: a kind and a fixed message for that kind, and nothing from the underlying error. No path is carried and never the file's text. reason is present exactly when error is rootUnavailable; sha256, the file's current hash, only when error is changed because the file on disk no longer has expectedSha256.
+ *
+ * This interface was referenced by `SourceFile`'s JSON-Schema
+ * via the `definition` "sourceError".
+ */
+export interface SourceError {
+  error: SourceErrorKind;
+  /**
+   * A sentence for a person, the same for every request with this kind.
+   */
+  message: string;
+  reason?: SourceRootReason;
+  sha256?: SourceSha256;
+}

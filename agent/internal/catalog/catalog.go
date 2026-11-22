@@ -172,6 +172,13 @@ type hooks struct {
 	// beforeWrite is called right before Create writes pipeline.yaml in the
 	// pinned directory.
 	beforeWrite func(name string)
+	// midSourceWrite is called by WriteSource after the first half of the
+	// text is written to the temporary file; an error from it fails the
+	// write there, as a full disk would.
+	midSourceWrite func() error
+	// beforeSourcePin is called with a directory's name after a source read
+	// or write has looked at it and right before it is pinned.
+	beforeSourcePin func(name string)
 }
 
 // Catalog lists, opens and creates pipelines under the roots a
@@ -183,6 +190,9 @@ type Catalog struct {
 	guard  *projectfs.Guard
 	logger *slog.Logger
 	create sync.Mutex
+	// source serializes WriteSource, so two writes in one agent never
+	// interleave between the hash check and the rename.
+	source sync.Mutex
 	hook   hooks
 }
 

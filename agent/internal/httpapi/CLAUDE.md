@@ -9,20 +9,22 @@ Adding a route
 - `newHandler` in `routes.go` is the only place a mux exists, and it returns
   it wrapped in the one `guard`. Request-and-answer routes that read nothing
   are rows in `apiRoutes()` (`/api/health`, `/api/version`); the channel,
-  `/api/directories`, `/api/roots`, `/api/pipelines` and `/api/connections`
-  are registered in `newHandler` itself, because the row tests hold every row
-  to answering `200` with a JSON object
+  `/api/directories`, `/api/roots`, `/api/pipelines`,
+  `/api/pipelines/source` and `/api/connections` are registered in
+  `newHandler` itself, because the row tests hold every row to answering
+  `200` with a JSON object
 - `TestOnlyNewHandlerBuildsAMuxAndItWrapsIt`,
   `TestTheServedHandlerIsExactlyTheGuardedOne` (`source_test.go`) and
   `TestANewlyAddedRouteCannotSkipTheChecks` (`guard_test.go`) fail a route
   registered any other way; `channel_test.go` fails when something is
   registered that no test covers. A new endpoint gets its own rejection matrix
-  test, as `directories_test.go`, `roots_test.go`, `pipelines_test.go` and
-  `connections_test.go` have
+  test, as `directories_test.go`, `roots_test.go`, `pipelines_test.go`,
+  `connections_test.go` and `sources_test.go` have
 - an error answers a kind and a fixed sentence from the table in its handler
-  file (`directories.go`, `roots.go`, `pipelines.go`, `connections.go`, which
-  also hold the status per kind), never text from the underlying error: a `projectfs`
-  refusal can describe what is outside the roots. The pipeline errors' schema
+  file (`directories.go`, `roots.go`, `pipelines.go`, `connections.go`,
+  `sources.go`, which also hold the status per kind), never text from the
+  underlying error: a `projectfs` refusal can describe what is outside the
+  roots. The pipeline errors' schema
   problems are the one exception: they describe the document, not the disk
 - a request body is `application/json` and bounded; `/api/roots` reads it
   token by token (at most 4096 bytes, one object, `path` once and nothing
@@ -63,6 +65,21 @@ The pipeline endpoints (`pipelines.go`, #48)
   package only converts its answers; it never touches the parsed model, and a
   `catalog.Entry`'s real directory path is not sent: an answer carries no path
   but the listed root and directory
+
+The source file endpoints (`sources.go`, #87)
+
+- `GET /api/pipelines/source?root=&directory=&path=` reads one file of a
+  listed pipeline (`root` and `directory` as the open route takes them, `path`
+  inside the pipeline directory) and answers its exact text, its SHA-256 and
+  whether it is under `generated/`. `PUT /api/pipelines/source` writes it,
+  with exactly one of `expectedSha256` and `expectedAbsent: true`, and answers
+  the new hash. Both call `ReadSource`/`WriteSource` on `Options.Pipelines`;
+  `internal/catalog/CLAUDE.md` has the rules
+- the `PUT` body is read token by token like the others, at most
+  `maxSourceRequestBytes` (six times 1 MiB, the most JSON escaping makes of
+  a 1 MiB text, plus 16384); over that is `invalid`, and a decoded text over
+  1 MiB is `tooLarge`. `changed` carries the current hash, never the text; no
+  answer or log line carries a path or the text (`sources_test.go`)
 
 The checks every request gets (`guard.go`, `origin.go`, `guard_test.go`,
 `origin_test.go`)

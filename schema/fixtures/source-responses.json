@@ -1,0 +1,375 @@
+{
+  "$comment": "The one set of source file endpoint fixtures (#87). Both toolchains read this file: agent/internal/httpapi/sources_fixtures_test.go and packages/schema/src/source-fixtures.test.ts. Never copy it per language. files are SourceFile answers (GET /api/pipelines/source), requests are SourceWriteRequest bodies (PUT), written are SourceWritten answers (PUT), errors are SourceError answers; each side checks them against the authoritative JSON Schema and against what it was generated into. The pairings the schema states in words (exactly one of expectedSha256 and expectedAbsent, reason exactly when rootUnavailable, sha256 only when changed) are held by both tests: a valid fixture keeps them, and the cases in pairingViolations pass the schema and break one.",
+  "files": {
+    "valid": [
+      {
+        "name": "in-a-directory",
+        "why": "A file under src/ of a pipeline in a directory of its root, with CRLF line endings kept as they are.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "path": "src/main.py",
+          "text": "def run(message):\r\n    return message\r\n",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generated": false
+        }
+      },
+      {
+        "name": "root-pipeline-generated",
+        "why": "A root that is itself the pipeline has no directory; a file under generated/ says so.",
+        "body": {
+          "root": "/home/user/orders",
+          "path": "generated/kpv-manifest.json",
+          "text": "{}",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "generated": true
+        }
+      },
+      {
+        "name": "empty",
+        "why": "An empty file is text.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "path": "README",
+          "text": "",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generated": false
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "no-hash",
+        "why": "The hash is required.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "src/main.py",
+          "text": "",
+          "generated": false
+        }
+      },
+      {
+        "name": "upper-case-hash",
+        "why": "The hash is lowercase hex.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "src/main.py",
+          "text": "",
+          "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "generated": false
+        }
+      },
+      {
+        "name": "absolute-path",
+        "why": "A path cannot start with a slash.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "/etc/passwd",
+          "text": "",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generated": false
+        }
+      },
+      {
+        "name": "dot-path",
+        "why": "A path cannot start with a dot.",
+        "body": {
+          "root": "/home/user/code",
+          "path": ".env",
+          "text": "",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generated": false
+        }
+      },
+      {
+        "name": "empty-directory",
+        "why": "A directory, when present, is not empty.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "",
+          "path": "a",
+          "text": "",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generated": false
+        }
+      },
+      {
+        "name": "no-generated",
+        "why": "generated is required.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "text": "",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "extra-field",
+        "why": "Nothing else is carried, a real path least of all.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "text": "",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generated": false,
+          "realPath": "/home/user/code/a"
+        }
+      }
+    ]
+  },
+  "requests": {
+    "valid": [
+      {
+        "name": "update",
+        "why": "An update with the hash the read answered.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "path": "src/main.py",
+          "text": "print('hi')\n",
+          "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "create",
+        "why": "A create of a file that does not exist yet, in a root that is itself the pipeline.",
+        "body": {
+          "root": "/home/user/orders",
+          "path": "src/new.py",
+          "text": "",
+          "expectedAbsent": true
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "absent-false",
+        "why": "expectedAbsent is true or left out.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "text": "",
+          "expectedAbsent": false
+        }
+      },
+      {
+        "name": "no-text",
+        "why": "The text is required.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "backslash",
+        "why": "A backslash is not in a path.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "src\\main.py",
+          "text": "",
+          "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "short-hash",
+        "why": "The hash is 64 hex digits.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "text": "",
+          "expectedSha256": "abc"
+        }
+      },
+      {
+        "name": "unknown-field",
+        "why": "Nothing else is taken.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "text": "",
+          "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "force": true
+        }
+      },
+      {
+        "name": "long-path",
+        "why": "A path is at most 512 characters.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "text": "",
+          "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ]
+  },
+  "written": {
+    "valid": [
+      {
+        "name": "written",
+        "why": "The new hash, for the next write.",
+        "body": {
+          "root": "/home/user/code",
+          "directory": "orders",
+          "path": "src/main.py",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "text-echoed",
+        "why": "A write's answer never carries the text.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "src/main.py",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "text": "print('hi')\n"
+        }
+      },
+      {
+        "name": "no-hash",
+        "why": "The new hash is required.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "src/main.py"
+        }
+      }
+    ]
+  },
+  "errors": {
+    "valid": [
+      {
+        "name": "invalid",
+        "why": "A request the agent will not reason about.",
+        "body": {
+          "error": "invalid",
+          "message": "name a listed root, its pipeline directory and a relative path inside it, and send a write with exactly one of expectedSha256 and expectedAbsent"
+        }
+      },
+      {
+        "name": "root-unavailable",
+        "why": "An unavailable root says why, as the open route does.",
+        "body": {
+          "error": "rootUnavailable",
+          "message": "this project directory is unavailable",
+          "reason": "notFound"
+        }
+      },
+      {
+        "name": "changed-with-hash",
+        "why": "A stale write carries the file's current hash and not its text.",
+        "body": {
+          "error": "changed",
+          "message": "the file or a directory on its path changed since it was read, so nothing was written",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        }
+      },
+      {
+        "name": "changed-swap",
+        "why": "A directory swapped while it was opened is changed with no hash.",
+        "body": {
+          "error": "changed",
+          "message": "the file or a directory on its path changed since it was read, so nothing was written"
+        }
+      },
+      {
+        "name": "every-other-kind",
+        "why": "One kind with nothing else.",
+        "body": {
+          "error": "notText",
+          "message": "the file or the text is not UTF-8 text without NUL bytes"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "unknown-kind",
+        "why": "Only the schema's kinds.",
+        "body": {
+          "error": "permission denied",
+          "message": "x"
+        }
+      },
+      {
+        "name": "text-carried",
+        "why": "An error never carries the file's text.",
+        "body": {
+          "error": "exists",
+          "message": "x",
+          "text": "secret"
+        }
+      },
+      {
+        "name": "path-carried",
+        "why": "An error never carries a path.",
+        "body": {
+          "error": "notFound",
+          "message": "x",
+          "path": "/home/user/code/orders/src/main.py"
+        }
+      },
+      {
+        "name": "no-message",
+        "why": "The message is required.",
+        "body": {
+          "error": "io"
+        }
+      }
+    ]
+  },
+  "pairingViolations": {
+    "requests": [
+      {
+        "name": "neither",
+        "why": "Neither expectedSha256 nor expectedAbsent.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "text": ""
+        }
+      },
+      {
+        "name": "both",
+        "why": "Both expectedSha256 and expectedAbsent.",
+        "body": {
+          "root": "/home/user/code",
+          "path": "a",
+          "text": "",
+          "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "expectedAbsent": true
+        }
+      }
+    ],
+    "errors": [
+      {
+        "name": "reason-without-root-unavailable",
+        "why": "A reason with another kind.",
+        "body": {
+          "error": "notFound",
+          "message": "x",
+          "reason": "notFound"
+        }
+      },
+      {
+        "name": "root-unavailable-without-reason",
+        "why": "rootUnavailable without its reason.",
+        "body": {
+          "error": "rootUnavailable",
+          "message": "x"
+        }
+      },
+      {
+        "name": "hash-without-changed",
+        "why": "A hash with another kind.",
+        "body": {
+          "error": "exists",
+          "message": "x",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ]
+  }
+}

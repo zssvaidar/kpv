@@ -65,6 +65,8 @@ function setup(probes: AgentResult<null>[]) {
     listPipelines: () => Promise.reject(new Error('not used')),
     openPipeline: () => Promise.reject(new Error('not used')),
     createPipeline: () => Promise.reject(new Error('not used')),
+    readSource: () => Promise.reject(new Error('not used')),
+    writeSource: () => Promise.reject(new Error('not used')),
     listConnections: () => Promise.reject(new Error('not used')),
     listConnectionNames: () => Promise.reject(new Error('not used')),
     createConnection: () => Promise.reject(new Error('not used')),

@@ -1,7 +1,8 @@
 # internal/catalog
 
 Where pipelines live (#48): the list of every pipeline under the authorized
-project roots, open, create, and `Load`/`Save` of a `pipeline.yaml`. Parsing,
+project roots, open, create, `Load`/`Save` of a `pipeline.yaml`, and reading
+and writing a pipeline's source files (#87). Parsing,
 validating and rendering are `internal/pipeline`'s; every filesystem operation
 is `internal/projectfs`'s. What it may import is in `agent/CLAUDE.md`
 (`source_test.go`).
@@ -69,5 +70,29 @@ Open and create (`open.go`, `create.go`)
 - errors are `*Error`, a kind plus the document's problems, never a path or
   an underlying error's text; logs carry kinds and counts
 - tests reach inside an operation through `Catalog.hook` (`afterMkdir`,
-  `beforeWrite`, `scanning`, `beforePin`); every test uses a scratch home
-  and roots store
+  `beforeWrite`, `scanning`, `beforePin`, `midSourceWrite`,
+  `beforeSourcePin`); every test uses a scratch home and roots store
+
+Source files (`source.go`, #87)
+
+- `ReadSource` and `WriteSource` address a file by the pipeline's `Location`
+  and a path relative to the pipeline directory (a `customCode.path`). The
+  path is checked before anything is touched: the schema's pattern and length,
+  then no empty, `.`, `..` or dot-led segment, no trailing `/` (`invalid`).
+  The only name rules are `generated/` as the first segment (readable,
+  `Generated` set; a write is `generated`) and `pipeline.yaml` at the top
+  (`reserved`), both ignoring case
+- the pipeline directory is found as `Open` finds it (only a listed pipeline,
+  else `notFound`; the root answers as for `Open`), and it and every directory
+  on the path are pinned one name at a time (`pinOne`): a link is `link`, a
+  swap `changed`, an unsearchable directory `unreadable`. The file is read by
+  its single name in the last pin (`readSourceIn`: a link `link`, not regular
+  `notRegularFile`, over 1 MiB `tooLarge`, not UTF-8 or a NUL `notText`, the
+  open file `sameFile` as the one described)
+- a write takes exactly one of `ExpectedSHA256` (mismatch `changed` with the
+  current hash in `Error.SHA256`; no file `notFound`) and `ExpectedAbsent`
+  (a file there is `exists`); only an `ExpectedAbsent` write creates missing
+  directories (`Mkdir` `0755` inside the pin above). The file is written with
+  `Path.WriteAtomically` (`0644` new), and writes are serialized by
+  `Catalog.source`, so a second write with the same hash is `changed`. Tests:
+  `sources_test.go`, hooks `midSourceWrite` and `beforeSourcePin`

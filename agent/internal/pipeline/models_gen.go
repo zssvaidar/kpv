@@ -49,8 +49,10 @@ func (j *CustomCodeConfiguration) UnmarshalJSON(value []byte) error {
 // Points at user-owned code that implements a step. Optional on every step: a step
 // without it is fully described by its configuration.
 type CustomCodeReference struct {
-	// Project-relative path of the file holding the code. Relative by construction:
-	// it cannot start with a dot or a slash.
+	// Path of the file holding the code, relative to the pipeline directory (the one
+	// holding pipeline.yaml), segments separated by /. Relative by construction: it
+	// cannot start with a dot or a slash. The agent reads and writes it only when no
+	// segment is empty, . or .., or starts with a dot, and it does not end with /.
 	Path string `json:"path" yaml:"path"`
 
 	// Name of the function or class inside that file, when the file holds more than

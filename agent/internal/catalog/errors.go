@@ -4,8 +4,11 @@ import (
 	"github.com/zssvaidar/kpv/agent/internal/projectfs"
 )
 
-// ErrorKind says why an Open, a Create, a Load or a Save failed. The values
-// are the ones schema/pipelines.schema.json's PipelinesErrorKind names.
+// ErrorKind says why an Open, a Create, a Load, a Save, a ReadSource or a
+// WriteSource failed. The values are the ones
+// schema/pipelines.schema.json's PipelinesErrorKind names, and the source
+// kinds below, which schema/source.schema.json's SourceErrorKind names with
+// the ones they share.
 type ErrorKind string
 
 const (
@@ -38,6 +41,29 @@ const (
 	KindIO ErrorKind = "io"
 )
 
+// The kinds only a source read or write answers (#87). A source read or write
+// also answers KindInvalid, KindNotAuthorized, KindRootUnavailable,
+// KindNotFound, KindUnreadable, KindChanged and KindIO.
+const (
+	// KindReserved is a source path that is the pipeline's own pipeline.yaml.
+	KindReserved ErrorKind = "reserved"
+	// KindGenerated is a source write under generated/, which belongs to the
+	// tool.
+	KindGenerated ErrorKind = "generated"
+	// KindLink is a pipeline directory, a directory on a source path, or the
+	// source file that is a symbolic link, which is never followed.
+	KindLink ErrorKind = "link"
+	// KindExists is a source write that expected no file and found one.
+	KindExists ErrorKind = "exists"
+	// KindNotRegularFile is a source path naming a directory, FIFO, socket or
+	// device.
+	KindNotRegularFile ErrorKind = "notRegularFile"
+	// KindTooLarge is a source file, or a text to write, over MaxFileSize.
+	KindTooLarge ErrorKind = "tooLarge"
+	// KindNotText is source bytes that are not UTF-8 or hold a NUL.
+	KindNotText ErrorKind = "notText"
+)
+
 // Error is the one failure this package reports. It carries kinds and the
 // document's own problems, never a path or the text of an underlying error,
 // so it can be logged and answered as it is.
@@ -50,6 +76,9 @@ type Error struct {
 	// Problems is where a pipeline a create or a save would write fails the
 	// pipeline schema, set with KindInvalid when that is why.
 	Problems []Problem
+	// SHA256 is the source file's current hash, set with KindChanged when a
+	// write found the file no longer has the hash it expected.
+	SHA256 string
 	// DirectoryLeftBehind is set on a create that failed after it made the
 	// pipeline's directory: whether that directory is still there. It is
 	// true when the directory could not be shown to be the empty one the

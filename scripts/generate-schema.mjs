@@ -6,7 +6,7 @@
 // it, and `pnpm run generate:check` (which CI runs) regenerates and fails when
 // the committed output differs, which is also what catches a hand-edit.
 //
-// There are six schemas, and they are separate files because they describe
+// There are seven schemas, and they are separate files because they describe
 // separate things:
 //   - schema/pipeline.schema.json   the pipeline model
 //   - schema/channel.schema.json    the envelope the agent pushes over the
@@ -26,6 +26,9 @@
 //                                   its credentials, an update, a delete,
 //                                   the list without credentials, the name
 //                                   list, or an error
+//   - schema/source.schema.json     what the source file endpoints take and
+//                                   answer (#87): a pipeline's source file,
+//                                   a write, its answer or an error
 // Each one generates the same four artifacts: TypeScript types, Zod schemas,
 // the raw schema as a module, and Go structs plus a copy of the schema the Go
 // module can embed.
@@ -140,6 +143,19 @@ const schemas = [
     extraSchemaCopies: [join('agent', 'internal', 'connections')],
     // The record, the update, the delete, the name list and the error are
     // definitions the list does not refer to, and a client needs them all.
+    unreachableDefinitions: true,
+  },
+  {
+    file: 'source.schema.json',
+    prefix: 'source',
+    rootName: 'SourceFile',
+    rootConst: 'sourceFileSchema',
+    rawConst: 'sourceJsonSchema',
+    goPackage: 'httpapi',
+    goDir: join('agent', 'internal', 'httpapi'),
+    goFile: 'sources_models_gen.go',
+    // The write request, its answer and the error are definitions the read
+    // answer does not refer to, and a client needs every one of them.
     unreachableDefinitions: true,
   },
 ];
@@ -412,6 +428,61 @@ const assertTheUncheckedReasonsMatch = (byFile) => {
   }
 };
 
+/**
+ * The source endpoints address a file by a custom-code block's path and
+ * answer an unavailable root as the open route does, so the source schema
+ * copies the pipeline schema's customCodeReference path rule and the pipeline
+ * endpoints' root reasons. The files cannot share a `$ref`, and this keeps the
+ * copies the same.
+ */
+const assertTheSourceCopiesMatch = (byFile) => {
+  const rule = (node) =>
+    node === undefined
+      ? undefined
+      : JSON.stringify({
+          type: node.type,
+          minLength: node.minLength,
+          maxLength: node.maxLength,
+          pattern: node.pattern,
+        });
+  const named = rule(
+    byFile['pipeline.schema.json']?.$defs?.customCodeReference?.properties
+      ?.path,
+  );
+  const own = rule(byFile['source.schema.json']?.$defs?.sourcePath);
+  const opened =
+    byFile['pipelines.schema.json']?.$defs?.pipelineRootReason?.enum;
+  const reasons = byFile['source.schema.json']?.$defs?.sourceRootReason?.enum;
+  if (
+    named === undefined ||
+    own === undefined ||
+    !Array.isArray(opened) ||
+    !Array.isArray(reasons)
+  ) {
+    throw new Error(
+      'the pipeline customCodeReference path, the source sourcePath, the pipelines pipelineRootReason or the source sourceRootReason is gone, so nothing is holding the copies to the same rules',
+    );
+  }
+  if (named !== own) {
+    throw new Error(
+      [
+        'a custom-code block and the source endpoints disagree about what a source path is:',
+        `  schema/pipeline.schema.json $defs/customCodeReference/properties/path  ${named}`,
+        `  schema/source.schema.json   $defs/sourcePath                           ${own}`,
+      ].join('\n'),
+    );
+  }
+  if (JSON.stringify(opened) !== JSON.stringify(reasons)) {
+    throw new Error(
+      [
+        'the source endpoints and the open route disagree about why a root is unavailable:',
+        `  schema/pipelines.schema.json $defs/pipelineRootReason/enum  ${JSON.stringify(opened)}`,
+        `  schema/source.schema.json    $defs/sourceRootReason/enum    ${JSON.stringify(reasons)}`,
+      ].join('\n'),
+    );
+  }
+};
+
 // --- Zod ---------------------------------------------------------------------
 
 const zodModuleFor = (schema, spec) => {
@@ -567,6 +638,7 @@ const main = async () => {
   assertTheRootReasonsMatch(byFile);
   assertTheConnectionNameRulesMatch(byFile);
   assertTheUncheckedReasonsMatch(byFile);
+  assertTheSourceCopiesMatch(byFile);
 
   for (const { spec, schema, source } of sources) {
     await generate(spec, schema, source);

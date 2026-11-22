@@ -101,7 +101,7 @@
       "required": ["path"],
       "properties": {
         "path": {
-          "description": "Project-relative path of the file holding the code. Relative by construction: it cannot start with a dot or a slash.",
+          "description": "Path of the file holding the code, relative to the pipeline directory (the one holding pipeline.yaml), segments separated by /. Relative by construction: it cannot start with a dot or a slash. The agent reads and writes it only when no segment is empty, . or .., or starts with a dot, and it does not end with /.",
           "type": "string",
           "minLength": 1,
           "maxLength": 512,

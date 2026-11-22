@@ -47,6 +47,10 @@ import type {
   PipelinesError,
   RootList,
   RootsError,
+  SourceError,
+  SourceFile,
+  SourceWriteRequest,
+  SourceWritten,
 } from '@kpv/schema';
 import {
   authorizedRootSchema,
@@ -61,6 +65,9 @@ import {
   pipelinesErrorSchema,
   rootListSchema,
   rootsErrorSchema,
+  sourceErrorSchema,
+  sourceFileSchema,
+  sourceWrittenSchema,
 } from '@kpv/schema';
 
 /**
@@ -107,6 +114,28 @@ export interface DirectoryQuery {
   limit?: number;
 }
 
+/**
+ * Which source file to read: the pipeline's root and directory as the list
+ * gave them, and the file's path inside the pipeline directory, the one
+ * holding pipeline.yaml (a custom-code block's `customCode.path`).
+ */
+export interface SourceLocation extends PipelineLocation {
+  path: string;
+}
+
+/**
+ * A source file write (#87): the text, and exactly one of the hash the read
+ * answered and `expectedAbsent` for a file that does not exist yet. The
+ * generated `SourceWriteRequest` states that pairing only in words, so this
+ * type holds it.
+ */
+export type SourceWrite = SourceLocation &
+  Pick<SourceWriteRequest, 'text'> &
+  (
+    | { expectedSha256: string; expectedAbsent?: never }
+    | { expectedAbsent: true; expectedSha256?: never }
+  );
+
 /** The agent's API, as the page sees it. */
 export interface AgentClient {
   /**
@@ -152,6 +181,24 @@ export interface AgentClient {
   createPipeline(
     request: CreatePipelineRequest,
   ): Promise<AgentResult<PipelineDocument, PipelinesError>>;
+  /**
+   * One source file of a pipeline, its exact text and the SHA-256 of its
+   * bytes: `GET /api/pipelines/source` (#87). The error's `error` is the
+   * kind: `notFound`, `link`, `tooLarge`, `notText` and the rest.
+   */
+  readSource(
+    location: SourceLocation,
+  ): Promise<AgentResult<SourceFile, SourceError>>;
+  /**
+   * Writes a source file: `PUT /api/pipelines/source` (#87). The answer is
+   * the new hash, which the next write sends. A file that no longer has
+   * `expectedSha256` is the `changed` error with its current hash; one that
+   * exists when `expectedAbsent` was sent is `exists`. Nothing is written
+   * then.
+   */
+  writeSource(
+    write: SourceWrite,
+  ): Promise<AgentResult<SourceWritten, SourceError>>;
   /**
    * Every stored Kafka connection without its credentials:
    * `GET /api/connections` (#24). A summary says only whether each
@@ -213,8 +260,9 @@ export function createAgentClient(
 ): AgentClient {
   // The one function that sends a request. The token goes in a header rather
   // than the URL, so it is not in any URL a request was made to. A request
-  // with a body is a roots route's RootRequest (#63), a pipeline create (#48)
-  // or a connection create, update or delete (#24), which the agent takes
+  // with a body is a roots route's RootRequest (#63), a pipeline create (#48),
+  // a connection create, update or delete (#24) or a source write (#87),
+  // which the agent takes
   // only as application/json; the browser adds the page's Origin to a POST,
   // PUT or DELETE itself, which those routes require.
   async function send(
@@ -352,6 +400,42 @@ export function createAgentClient(
       );
     },
 
+    readSource(location) {
+      const params = new URLSearchParams({ root: location.root });
+      if (location.directory !== undefined) {
+        params.set('directory', location.directory);
+      }
+      params.set('path', location.path);
+      return call(
+        `/api/pipelines/source?${params.toString()}`,
+        sourceFileParser,
+        sourceErrorParser,
+      );
+    },
+
+    writeSource(write) {
+      const body: SourceWriteRequest = {
+        root: write.root,
+        path: write.path,
+        text: write.text,
+      };
+      if (write.directory !== undefined) {
+        body.directory = write.directory;
+      }
+      if (write.expectedSha256 !== undefined) {
+        body.expectedSha256 = write.expectedSha256;
+      } else {
+        body.expectedAbsent = true;
+      }
+      return call(
+        '/api/pipelines/source',
+        sourceWrittenParser,
+        sourceErrorParser,
+        'PUT',
+        body,
+      );
+    },
+
     listConnections() {
       return call(
         '/api/connections',
@@ -447,13 +531,21 @@ const connectionSummaryParser =
 const connectionsErrorParser =
   connectionsErrorSchema as unknown as Parser<ConnectionsError>;
 
+// The source answers likewise, from schema/source.schema.json: a file's and
+// a write's directory and an error's reason and hash are optional.
+const sourceFileParser = sourceFileSchema as unknown as Parser<SourceFile>;
+const sourceWrittenParser =
+  sourceWrittenSchema as unknown as Parser<SourceWritten>;
+const sourceErrorParser = sourceErrorSchema as unknown as Parser<SourceError>;
+
 /**
- * What a request body is: a RootRequest, a CreatePipelineRequest, or a
- * connection create, update or delete.
+ * What a request body is: a RootRequest, a CreatePipelineRequest, a
+ * connection create, update or delete, or a source file write.
  */
 type RequestBody =
   | { path: string }
   | CreatePipelineRequest
+  | SourceWriteRequest
   | Connection
   | ConnectionUpdate
   | ConnectionDelete;

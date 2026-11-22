@@ -92,6 +92,25 @@ const everyRequest: [string, (api: AgentClient) => Promise<unknown>][] = [
         networkMode: 'docker',
       }),
   ],
+  [
+    'readSource',
+    (api) =>
+      api.readSource({
+        root: '/home/user/code',
+        directory: 'a',
+        path: 'src/main.py',
+      }),
+  ],
+  [
+    'writeSource',
+    (api) =>
+      api.writeSource({
+        root: '/home/user/code',
+        path: 'src/main.py',
+        text: '',
+        expectedAbsent: true,
+      }),
+  ],
   ['listConnections', (api) => api.listConnections()],
   ['listConnectionNames', (api) => api.listConnectionNames()],
   [
@@ -149,8 +168,10 @@ describe('createAgentClient', () => {
       'openChannel',
       'openPipeline',
       'probe',
+      'readSource',
       'revokeRoot',
       'updateConnection',
+      'writeSource',
     ]);
   });
 
@@ -421,6 +442,139 @@ describe('the pipeline methods', () => {
       await client(() =>
         json(200, { roots: [{ path: '/x' }] }),
       ).api.listPipelines(),
+    ).toEqual({ kind: 'failed', status: 200 });
+  });
+});
+
+describe('the source file methods', () => {
+  const sha = 'a'.repeat(64);
+  const file = {
+    root: '/home/user/code',
+    directory: 'orders',
+    path: 'src/main.py',
+    text: 'a = 1\r\n',
+    sha256: sha,
+    generated: false,
+  };
+  const written = {
+    root: '/home/user/code',
+    directory: 'orders',
+    path: 'src/main.py',
+    sha256: 'b'.repeat(64),
+  };
+
+  it('reads by root, directory and path only, and leaves the directory out for a root pipeline', async () => {
+    const { api, sent } = client(() => json(200, file));
+    expect(
+      await api.readSource({
+        root: '/home/user/code',
+        directory: 'orders',
+        path: 'src/main.py',
+      }),
+    ).toEqual({ kind: 'ok', value: file });
+    await api.readSource({ root: '/home/user/single', path: 'src/a.py' });
+    const first = new URL(sent[0]?.url ?? '');
+    expect(first.pathname).toBe('/api/pipelines/source');
+    expect([...first.searchParams.keys()]).toEqual([
+      'root',
+      'directory',
+      'path',
+    ]);
+    expect(first.searchParams.get('path')).toBe('src/main.py');
+    expect(sent[0]?.init?.method).toBe('GET');
+    const second = new URL(sent[1]?.url ?? '');
+    expect([...second.searchParams.keys()]).toEqual(['root', 'path']);
+  });
+
+  it('writes with PUT and a JSON body of exactly the request fields', async () => {
+    const { api, sent } = client(() => json(200, written));
+    expect(
+      await api.writeSource({
+        root: '/home/user/code',
+        directory: 'orders',
+        path: 'src/main.py',
+        text: 'a = 2\n',
+        expectedSha256: sha,
+      }),
+    ).toEqual({ kind: 'ok', value: written });
+    await api.writeSource({
+      root: '/home/user/single',
+      path: 'src/new.py',
+      text: '',
+      expectedAbsent: true,
+    });
+    expect(sent[0]?.init?.method).toBe('PUT');
+    expect(new URL(sent[0]?.url ?? '').pathname).toBe('/api/pipelines/source');
+    expect(new Headers(sent[0]?.init?.headers).get('Content-Type')).toBe(
+      'application/json',
+    );
+    expect(JSON.parse(sent[0]?.init?.body as string)).toEqual({
+      root: '/home/user/code',
+      directory: 'orders',
+      path: 'src/main.py',
+      text: 'a = 2\n',
+      expectedSha256: sha,
+    });
+    expect(JSON.parse(sent[1]?.init?.body as string)).toEqual({
+      root: '/home/user/single',
+      path: 'src/new.py',
+      text: '',
+      expectedAbsent: true,
+    });
+  });
+
+  it('takes exactly one of the hash and expectedAbsent, by its type', () => {
+    const { api } = client(() => json(200, written));
+    const location = { root: '/x', path: 'a', text: '' };
+    // @ts-expect-error neither expectation
+    void api.writeSource({ ...location });
+    const both = {
+      ...location,
+      expectedSha256: sha,
+      expectedAbsent: true as const,
+    };
+    // @ts-expect-error both expectations
+    void api.writeSource(both);
+  });
+
+  it('reads each kind as a typed error, a changed one with its current hash', async () => {
+    const changed = {
+      error: 'changed',
+      message:
+        'the file or a directory on its path changed since it was read, so nothing was written',
+      sha256: 'c'.repeat(64),
+    };
+    const answer = await client(() => json(409, changed)).api.writeSource({
+      root: '/x',
+      path: 'a',
+      text: '',
+      expectedSha256: sha,
+    });
+    expect(answer).toEqual({ kind: 'error', status: 409, error: changed });
+    if (answer.kind === 'error' && answer.error.error === 'changed') {
+      expect(answer.error.sha256).toBe('c'.repeat(64));
+    }
+    const notFound = { error: 'notFound', message: 'there is no such file' };
+    expect(
+      await client(() => json(404, notFound)).api.readSource({
+        root: '/x',
+        path: 'a',
+      }),
+    ).toEqual({ kind: 'error', status: 404, error: notFound });
+    // An error the schema does not name is not trusted as one.
+    expect(
+      await client(() =>
+        json(500, { error: 'EACCES', message: '/etc/shadow' }),
+      ).api.readSource({ root: '/x', path: 'a' }),
+    ).toEqual({ kind: 'failed', status: 500 });
+    expect(
+      await client(rejection).api.readSource({ root: '/x', path: 'a' }),
+    ).toEqual({ kind: 'rejected' });
+    // A read answer without its hash is not data.
+    expect(
+      await client(() =>
+        json(200, { ...file, sha256: undefined }),
+      ).api.readSource({ root: '/x', path: 'a' }),
     ).toEqual({ kind: 'failed', status: 200 });
   });
 });

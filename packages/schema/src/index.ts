@@ -7,7 +7,8 @@
 // single source of truth: the types and the Zod schemas in ./generated are
 // generated from schema/pipeline.schema.json, schema/channel.schema.json,
 // schema/directory.schema.json, schema/roots.schema.json,
-// schema/pipelines.schema.json and schema/connection.schema.json by
+// schema/pipelines.schema.json, schema/connection.schema.json and
+// schema/source.schema.json by
 // `pnpm run generate` and are never hand-edited. This file only decides what
 // the package exposes.
 
@@ -63,6 +64,14 @@ export { pipelinesJsonSchema } from './generated/pipelines-json-schema.js';
 export type * from './generated/connection-types.js';
 export * from './generated/connection-zod.js';
 export { connectionJsonSchema } from './generated/connection-json-schema.js';
+
+// The source file endpoints (#87): one source file of a pipeline with its
+// hash, the body a write sends, what a write answers, and the error a request
+// that could not be served gets. Generated from schema/source.schema.json, the
+// same file the agent's Go structs come from.
+export type * from './generated/source-types.js';
+export * from './generated/source-zod.js';
+export { sourceJsonSchema } from './generated/source-json-schema.js';
 
 // The connection combination rules the schema states in prose, which the Go
 // agent implements again in internal/connections/rules.go.
