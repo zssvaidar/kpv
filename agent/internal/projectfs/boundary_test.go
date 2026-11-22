@@ -1,12 +1,21 @@
-// Structural tests: two claims about the whole agent module that no behaviour
-// can show.
+// Structural tests: claims about the whole agent module that no behaviour can
+// show.
 //
 // The first is #6's constraint in as many words -- no path from an API
-// parameter is interpolated into a shell command anywhere. The strongest form
-// of that is not an assertion about one handler, it is that the agent has no
-// way to run a command at all: nothing imports os/exec, nothing reaches the
-// process-spawning calls, and nothing names a shell. A path cannot be
-// interpolated into a command that does not exist.
+// parameter is interpolated into a shell command anywhere. Until #37 that was
+// kept by the agent having no way to run a command at all. It now has exactly
+// one: internal/process may start a process, and only a Program from its fixed
+// table (internal/process/programs.go), whose executable, arguments and
+// environment names are written there, with no shell and nothing taken from a
+// request but stdin bytes. Every other package keeps every ban: no os/exec, no
+// syscall, no golang.org/x/sys, no process-spawning call, and no string
+// literal naming a shell or its -c flag. Inside internal/process the bans that
+// would reach around the table stay too, and so does the literal ban. Which
+// packages may import internal/process is a list here; httpapi is never on it.
+//
+// A later issue that needs a program adds its entry to programs.go, which
+// TestEveryProgramInTheTableIsWellFormed checks, and the package that runs it
+// to processImporters below, with the reason. Nothing else changes here.
 //
 // The second is the constraint that makes this package worth having: all
 // filesystem code routes through it rather than calling os directly. That is
@@ -18,7 +27,8 @@
 //
 // Both tests read the syntax tree of every non-test file in the module. Test
 // files are excluded on purpose: a test may run a command (one of #3's does,
-// to prove its output is byte-identical across processes) and may touch the
+// to prove its output is byte-identical across processes, and
+// internal/process's fakes are the test binary run again) and may touch the
 // filesystem freely, and neither is ever handed an API parameter.
 
 package projectfs
@@ -139,18 +149,42 @@ func rendered(t *testing.T, file moduleFile, node ast.Node) string {
 	return out.String()
 }
 
-// No path from an API parameter is interpolated into a shell command, because
-// the agent cannot run a command at all.
+// The one package that may start a process, and why. It is a single entry on
+// purpose: a second package that wants to start one goes through this one.
+var processAllowance = map[string]string{
+	"internal/process": "runs only a Program from its fixed table, with no shell, no argument from a request, and a kill of the whole process group after every run",
+}
+
+// What the allowance lets internal/process do that no other package may.
+var (
+	processAllowedImports = map[string]bool{"os/exec": true, "syscall": true}
+	processAllowedCalls   = map[string]bool{"exec.CommandContext": true, "exec.LookPath": true}
+	// The only syscall names internal/process may use: the process group, its
+	// kill, and reading how the child ended.
+	processSyscallNames = map[string]bool{"SysProcAttr": true, "Kill": true, "SIGKILL": true, "Signal": true, "WaitStatus": true}
+)
+
+// The packages whose non-test files may import internal/process, and why.
+// #51 and #36 add theirs here rather than making another exception.
+var processImporters = map[string]string{
+	"internal/parser": "runs a parser sidecar (#37, #38, #39)",
+}
+
+const processPackage = "github.com/zssvaidar/kpv/agent/internal/process"
+
+// No path from an API parameter is interpolated into a shell command: only
+// internal/process can start a process, only a fixed-table program, and never
+// a shell.
 func TestNothingInTheAgentCanRunACommand(t *testing.T) {
 	t.Parallel()
 
 	bannedImports := map[string]string{
-		"os/exec":                  "runs commands",
-		"syscall":                  "reaches exec and fork directly",
-		"golang.org/x/sys/unix":    "reaches exec and fork directly",
-		"golang.org/x/sys/windows": "reaches exec and fork directly",
-		"golang.org/x/sys/execabs": "runs commands",
+		"os/exec": "runs commands",
+		"syscall": "reaches exec and fork directly",
 	}
+	// Every golang.org/x/sys package is banned, internal/process included:
+	// unix, windows and execabs all reach exec or fork.
+	const bannedImportPrefix = "golang.org/x/sys"
 
 	bannedCalls := map[string]string{
 		"exec.Command":          "runs a command",
@@ -163,7 +197,8 @@ func TestNothingInTheAgentCanRunACommand(t *testing.T) {
 		"syscall.CreateProcess": "starts a process",
 	}
 	// A literal that would be the shell, or the flag that hands it a string
-	// to interpret. Either one appearing is the thing this test is about.
+	// to interpret. Either one appearing is the thing this test is about, in
+	// every package, internal/process too.
 	bannedLiterals := map[string]bool{
 		"sh": true, "bash": true, "zsh": true, "dash": true, "cmd": true,
 		"cmd.exe": true, "powershell": true, "powershell.exe": true, "pwsh": true,
@@ -171,19 +206,49 @@ func TestNothingInTheAgentCanRunACommand(t *testing.T) {
 		"-c": true, "/c": true, "-Command": true,
 	}
 
+	if len(processAllowance) != 1 {
+		t.Fatalf("processAllowance has %d entries; exactly one package may start a process", len(processAllowance))
+	}
+
 	files := parseModule(t)
+	processImportsExec := false
+	commandContextCalls := 0
+	forTestFile := ""
 	for _, file := range files {
+		_, allowed := processAllowance[file.pkg]
 		for _, path := range importsOfFile(t, file) {
-			if why, banned := bannedImports[path]; banned {
-				t.Errorf("%s imports %s, which %s; no path from an API parameter may reach a command, and the way to keep that true is to have no way to run one", file.path, path, why)
+			if strings.HasPrefix(path, bannedImportPrefix) {
+				t.Errorf("%s imports %s, which reaches exec and fork directly", file.path, path)
+			}
+			if why, banned := bannedImports[path]; banned && (!allowed || !processAllowedImports[path]) {
+				t.Errorf("%s imports %s, which %s; only internal/process may start a process, so no path from an API parameter can reach a command", file.path, path, why)
+			}
+			if allowed && path == "os/exec" {
+				processImportsExec = true
+			}
+			if path == processPackage {
+				if _, may := processImporters[file.pkg]; !may {
+					t.Errorf("%s imports internal/process, and %s is not on the list of packages that may", file.path, file.pkg)
+				}
 			}
 		}
 		ast.Inspect(file.file, func(node ast.Node) bool {
 			switch typed := node.(type) {
+			case *ast.FuncDecl:
+				if typed.Recv == nil && typed.Name.Name == "ForTest" && allowed {
+					forTestFile = file.path
+				}
 			case *ast.CallExpr:
 				written := rendered(t, file, typed.Fun)
-				if why, banned := bannedCalls[written]; banned {
+				if why, banned := bannedCalls[written]; banned && (!allowed || !processAllowedCalls[written]) {
 					t.Errorf("%s calls %s, which %s", file.path, written, why)
+				}
+				if allowed && written == "exec.CommandContext" {
+					commandContextCalls++
+				}
+			case *ast.SelectorExpr:
+				if ident, ok := typed.X.(*ast.Ident); ok && ident.Name == "syscall" && allowed && !processSyscallNames[typed.Sel.Name] {
+					t.Errorf("%s uses syscall.%s, which is not on the list internal/process may use", file.path, typed.Sel.Name)
 				}
 			case *ast.BasicLit:
 				if typed.Kind != token.STRING {
@@ -193,6 +258,33 @@ func TestNothingInTheAgentCanRunACommand(t *testing.T) {
 				if bannedLiterals[text] {
 					t.Errorf("%s has the literal %s in it, which names a shell or the flag that hands one a string to interpret", file.path, typed.Value)
 				}
+			}
+			return true
+		})
+	}
+
+	// The allowance cannot go stale: if internal/process stops importing
+	// os/exec, the entry above is allowing nothing and has to go.
+	if !processImportsExec {
+		t.Error("internal/process no longer imports os/exec, so its allowance here is stale")
+	}
+	if commandContextCalls != 1 {
+		t.Errorf("internal/process calls exec.CommandContext from %d places, want exactly one", commandContextCalls)
+	}
+
+	// ForTest builds an arbitrary Program. Only the file declaring it may
+	// name it; any other non-test file that does is shipping a way around
+	// the table.
+	if forTestFile == "" {
+		t.Fatal("no file in internal/process declares ForTest, so this test is not checking who names it")
+	}
+	for _, file := range files {
+		if file.path == forTestFile {
+			continue
+		}
+		ast.Inspect(file.file, func(node ast.Node) bool {
+			if ident, ok := node.(*ast.Ident); ok && ident.Name == "ForTest" {
+				t.Errorf("%s refers to ForTest, which only tests may use", file.path)
 			}
 			return true
 		})

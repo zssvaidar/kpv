@@ -8,7 +8,7 @@
 // generated from schema/pipeline.schema.json, schema/channel.schema.json,
 // schema/directory.schema.json, schema/roots.schema.json,
 // schema/pipelines.schema.json, schema/connection.schema.json and
-// schema/source.schema.json by
+// schema/source.schema.json and schema/parser.schema.json by
 // `pnpm run generate` and are never hand-edited. This file only decides what
 // the package exposes.
 
@@ -72,6 +72,13 @@ export { connectionJsonSchema } from './generated/connection-json-schema.js';
 export type * from './generated/source-types.js';
 export * from './generated/source-zod.js';
 export { sourceJsonSchema } from './generated/source-json-schema.js';
+
+// The parser contract (#37): what a parser reports about one source file, its
+// stages, the regions it could not read and its warnings. Generated from
+// schema/parser.schema.json, the same file the agent's Go structs come from.
+export type * from './generated/parser-types.js';
+export * from './generated/parser-zod.js';
+export { parserJsonSchema } from './generated/parser-json-schema.js';
 
 // The connection combination rules the schema states in prose, which the Go
 // agent implements again in internal/connections/rules.go.

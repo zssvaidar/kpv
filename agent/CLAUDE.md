@@ -41,15 +41,29 @@ These rules are tests that read the non-test source, so breaking one fails
   `*connections.Store`
 - `internal/projectfs` and `internal/pipeline` import no other agent package.
   No test holds this; it is true today (`go list -f '{{.Imports}}' ./...`)
+- `internal/process` imports no other agent package
+  (`internal/process/source_test.go`). Only the packages on
+  `processImporters` in `internal/projectfs/boundary_test.go` may import it:
+  after #37, only `internal/parser`
+- `internal/parser` imports `internal/process` and nothing else in the agent,
+  nor `os` or `path/filepath` (`internal/parser/source_test.go`): it is handed
+  source bytes, never a path
 
 Module-wide, in `internal/projectfs/boundary_test.go`:
 
 - no filesystem call (`os.Open`, `os.Stat`, `filepath.Abs`, ...) outside
   `internal/projectfs`
-- nothing can run a command: no `os/exec`, `syscall`, `golang.org/x/sys`, no
-  `os.StartProcess`, and no string literal naming a shell or its `-c` flag. An
-  issue that needs to run a process has to change this test, so raise it on
-  the issue first
+- one package may start a process, `internal/process` (#37), and only a
+  program from its fixed table (`internal/process/programs.go`), with no
+  shell and no argument, environment, working directory or executable taken
+  from a request: input reaches a child only as stdin bytes. Every other
+  package keeps every ban: no `os/exec`, `syscall`, `golang.org/x/sys`, no
+  `os.StartProcess` or other spawning call, and no string literal naming a
+  shell or its `-c` flag, which stays banned in `internal/process` too
+  (`internal/process/CLAUDE.md` lists what it may use). A later issue that
+  needs a program adds its entry to `programs.go` and its package, with the
+  reason, to `processImporters` in the boundary test, instead of making a new
+  exception; `internal/httpapi` never imports it
 
 ## Startup lines
 

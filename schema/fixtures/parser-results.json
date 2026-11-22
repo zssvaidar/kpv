@@ -1,0 +1,494 @@
+{
+  "$comment": "The one set of parser contract fixtures (#37). Both toolchains read this file: agent/internal/parser/fixtures_test.go and packages/schema/src/parser-fixtures.test.ts. Never copy it per language. valid results pass schema/parser.schema.json and invalid ones fail it, on both sides, against the JSON Schema and against what it was generated into. The rules the harness adds beyond the schema (ranges inside the source and on character boundaries, no overlaps, an unparseable result's stages and warnings, duplicate keys, trailing output) are the harness's and are tested in agent/internal/parser.",
+  "valid": [
+    {
+      "name": "three-stages",
+      "why": "A parsed result with a source, a filter and a destination, an unrecognized region with its reason and a warning tied to a range.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [
+          {
+            "type": "kafkaSource",
+            "range": {
+              "start": 0,
+              "end": 24
+            },
+            "configuration": {
+              "topic": "orders"
+            }
+          },
+          {
+            "type": "filter",
+            "range": {
+              "start": 25,
+              "end": 60
+            },
+            "configuration": {
+              "expression": "amount > 10"
+            }
+          },
+          {
+            "type": "kafkaDestination",
+            "range": {
+              "start": 61,
+              "end": 90
+            },
+            "configuration": {
+              "topic": "billing"
+            }
+          }
+        ],
+        "unrecognized": [
+          {
+            "range": {
+              "start": 90,
+              "end": 100
+            },
+            "reason": "a helper function"
+          }
+        ],
+        "warnings": [
+          {
+            "message": "the filter's expression was simplified",
+            "range": {
+              "start": 25,
+              "end": 60
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "every-stage-type",
+      "why": "Every step type of pipeline.schema.json is a stage type, in any order.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [
+          {
+            "type": "kafkaDestination",
+            "range": {
+              "start": 50,
+              "end": 60
+            },
+            "configuration": {}
+          },
+          {
+            "type": "customCode",
+            "range": {
+              "start": 40,
+              "end": 50
+            },
+            "configuration": {
+              "path": "src/main.py"
+            }
+          },
+          {
+            "type": "validate",
+            "range": {
+              "start": 30,
+              "end": 40
+            },
+            "configuration": {}
+          },
+          {
+            "type": "transform",
+            "range": {
+              "start": 20,
+              "end": 30
+            },
+            "configuration": {}
+          },
+          {
+            "type": "filter",
+            "range": {
+              "start": 10,
+              "end": 20
+            },
+            "configuration": {}
+          },
+          {
+            "type": "kafkaSource",
+            "range": {
+              "start": 0,
+              "end": 10
+            },
+            "configuration": {}
+          }
+        ],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "empty",
+      "why": "An empty source has nothing to report: no stages, regions or warnings.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "unparseable",
+      "why": "A source the parser could not read at all: no stages, and a warning saying why.",
+      "result": {
+        "contract": 1,
+        "status": "unparseable",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": [
+          {
+            "message": "invalid syntax",
+            "range": {
+              "start": 3,
+              "end": 5
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "optional-fields-left-out",
+      "why": "An unrecognized region without a reason and a warning without a range.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [
+          {
+            "range": {
+              "start": 0,
+              "end": 1
+            }
+          }
+        ],
+        "warnings": [
+          {
+            "message": "nothing recognized"
+          }
+        ]
+      }
+    },
+    {
+      "name": "free-form-configuration",
+      "why": "A stage's configuration is any JSON object, nested values included.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [
+          {
+            "type": "transform",
+            "range": {
+              "start": 0,
+              "end": 5
+            },
+            "configuration": {
+              "mappings": [
+                {
+                  "from": "a",
+                  "to": "b"
+                }
+              ],
+              "strict": true,
+              "depth": 2,
+              "note": null
+            }
+          }
+        ],
+        "unrecognized": [],
+        "warnings": []
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "contract-2",
+      "why": "Another contract version fails the schema.",
+      "result": {
+        "contract": 2,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "contract-string",
+      "why": "The contract is the integer 1, not a string.",
+      "result": {
+        "contract": "1",
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "no-contract",
+      "why": "The contract is required.",
+      "result": {
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "no-stages",
+      "why": "stages is required, even when empty.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "no-warnings",
+      "why": "warnings is required, even when empty.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": []
+      }
+    },
+    {
+      "name": "unknown-status",
+      "why": "status is parsed or unparseable.",
+      "result": {
+        "contract": 1,
+        "status": "partial",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "unknown-stage-type",
+      "why": "A stage type is a pipeline step type.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [
+          {
+            "type": "sink",
+            "range": {
+              "start": 0,
+              "end": 1
+            },
+            "configuration": {}
+          }
+        ],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "no-configuration",
+      "why": "A stage's configuration is required.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [
+          {
+            "type": "filter",
+            "range": {
+              "start": 0,
+              "end": 1
+            }
+          }
+        ],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "configuration-array",
+      "why": "A stage's configuration is an object.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [
+          {
+            "type": "filter",
+            "range": {
+              "start": 0,
+              "end": 1
+            },
+            "configuration": [1]
+          }
+        ],
+        "unrecognized": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "negative-start",
+      "why": "An offset is at least 0.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [
+          {
+            "range": {
+              "start": -1,
+              "end": 1
+            }
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "fractional-offset",
+      "why": "An offset is an integer.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [
+          {
+            "range": {
+              "start": 0,
+              "end": 1.5
+            }
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "offset-string",
+      "why": "An offset is a number.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [
+          {
+            "range": {
+              "start": "0",
+              "end": 1
+            }
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "range-extra",
+      "why": "A range has start and end and nothing else.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [
+          {
+            "range": {
+              "start": 0,
+              "end": 1,
+              "length": 1
+            }
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "range-no-end",
+      "why": "A range has an end.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [
+          {
+            "range": {
+              "start": 0
+            }
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "region-no-range",
+      "why": "An unrecognized region has a range.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [
+          {
+            "reason": "no idea"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "warning-empty-message",
+      "why": "A warning says something.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": [
+          {
+            "message": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "warning-no-message",
+      "why": "A warning has a message.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": [
+          {
+            "range": {
+              "start": 0,
+              "end": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "extra-property",
+      "why": "The top level has exactly the five properties.",
+      "result": {
+        "contract": 1,
+        "status": "parsed",
+        "stages": [],
+        "unrecognized": [],
+        "warnings": [],
+        "language": "python"
+      }
+    },
+    {
+      "name": "not-an-object",
+      "why": "A result is an object.",
+      "result": [
+        {
+          "contract": 1,
+          "status": "parsed",
+          "stages": [],
+          "unrecognized": [],
+          "warnings": []
+        }
+      ]
+    }
+  ]
+}

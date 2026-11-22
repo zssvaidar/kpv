@@ -6,7 +6,7 @@
 // it, and `pnpm run generate:check` (which CI runs) regenerates and fails when
 // the committed output differs, which is also what catches a hand-edit.
 //
-// There are seven schemas, and they are separate files because they describe
+// There are eight schemas, and they are separate files because they describe
 // separate things:
 //   - schema/pipeline.schema.json   the pipeline model
 //   - schema/channel.schema.json    the envelope the agent pushes over the
@@ -29,6 +29,9 @@
 //   - schema/source.schema.json     what the source file endpoints take and
 //                                   answer (#87): a pipeline's source file,
 //                                   a write, its answer or an error
+//   - schema/parser.schema.json     what a parser reports about a source
+//                                   file (#37): its stages, the regions it
+//                                   could not read, and its warnings
 // Each one generates the same four artifacts: TypeScript types, Zod schemas,
 // the raw schema as a module, and Go structs plus a copy of the schema the Go
 // module can embed.
@@ -157,6 +160,15 @@ const schemas = [
     // The write request, its answer and the error are definitions the read
     // answer does not refer to, and a client needs every one of them.
     unreachableDefinitions: true,
+  },
+  {
+    file: 'parser.schema.json',
+    prefix: 'parser',
+    rootName: 'ParserResult',
+    rootConst: 'parserResultSchema',
+    rawConst: 'parserJsonSchema',
+    goPackage: 'parser',
+    goDir: join('agent', 'internal', 'parser'),
   },
 ];
 
@@ -483,6 +495,44 @@ const assertTheSourceCopiesMatch = (byFile) => {
   }
 };
 
+/**
+ * A parser stage is a pipeline step, so the contract's stage types copy the
+ * step type discriminators of the pipeline schema: every definition there
+ * whose required `type` is pinned to one value. The files cannot share a
+ * `$ref`, and this keeps the copy the same set, so a new block type cannot be
+ * added to the model without the parsers being able to report it.
+ */
+const assertTheParserStageTypesMatch = (byFile) => {
+  const defs = byFile['pipeline.schema.json']?.$defs ?? {};
+  const discriminators = Object.values(defs)
+    .filter(
+      (node) =>
+        Array.isArray(node?.properties?.type?.enum) &&
+        node.properties.type.enum.length === 1 &&
+        (node.required ?? []).includes('type'),
+    )
+    .map((node) => node.properties.type.enum[0]);
+  const copied = byFile['parser.schema.json']?.$defs?.parserStageType?.enum;
+  if (discriminators.length === 0 || !Array.isArray(copied)) {
+    throw new Error(
+      'the pipeline step discriminators or the parser parserStageType enum is gone, so nothing is holding the parser contract to the step types',
+    );
+  }
+  const sorted = (list) => JSON.stringify([...list].sort());
+  if (
+    sorted(discriminators) !== sorted(copied) ||
+    new Set(copied).size !== copied.length
+  ) {
+    throw new Error(
+      [
+        'the parser contract and the pipeline model disagree about what a step type is:',
+        `  schema/pipeline.schema.json the type discriminators  ${sorted(discriminators)}`,
+        `  schema/parser.schema.json   $defs/parserStageType/enum  ${JSON.stringify(copied)}`,
+      ].join('\n'),
+    );
+  }
+};
+
 // --- Zod ---------------------------------------------------------------------
 
 const zodModuleFor = (schema, spec) => {
@@ -639,6 +689,7 @@ const main = async () => {
   assertTheConnectionNameRulesMatch(byFile);
   assertTheUncheckedReasonsMatch(byFile);
   assertTheSourceCopiesMatch(byFile);
+  assertTheParserStageTypesMatch(byFile);
 
   for (const { spec, schema, source } of sources) {
     await generate(spec, schema, source);

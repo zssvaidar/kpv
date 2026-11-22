@@ -33,6 +33,10 @@ Areas
 - `agent/internal/httpapi/CLAUDE.md` - the local HTTP API: token, origin,
   routes
 - `agent/internal/channel/CLAUDE.md` - the WebSocket push channel
+- `agent/internal/process/CLAUDE.md` - the one package that may start a
+  process: the fixed program table, `Run` and its bounds
+- `agent/internal/parser/CLAUDE.md` - the parser harness: sidecar and
+  in-process transports, and the validation of the parser contract
 - `packages/web/CLAUDE.md` - the web app, its one agent client, `pnpm dev`
 
 The schema is the source of truth
@@ -44,8 +48,8 @@ what `generatedPaths` in `scripts/check-generated.mjs` lists, apart from
 `schema/` itself:
 
 - `packages/schema/src/generated/`
-- every `agent/internal/**/*models_gen.go` (`pipelines_models_gen.go` and
-  `connections_models_gen.go` included)
+- every `agent/internal/**/*models_gen.go` (`pipelines_models_gen.go`,
+  `connections_models_gen.go` and `parser/models_gen.go` included)
 - the `*.schema.json` copies under `agent/internal/`
 
 `pnpm generate:check` (`scripts/check-generated.mjs`, run by CI) regenerates

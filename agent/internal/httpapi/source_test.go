@@ -107,19 +107,21 @@ func TestTheTokenSourceIsCryptographic(t *testing.T) {
 }
 
 // No route may reach the filesystem except through internal/projectfs, which
-// is where every path is checked (#6). A response cannot show this, so the
+// is where every path is checked (#6), or start a process (#37). A response cannot show this, so the
 // imports do: nothing here imports a package that opens a file, and the
 // directory browsing endpoint (#7) reads through a projectfs.Browser only.
 func TestNothingInThisPackageCanReachTheFilesystem(t *testing.T) {
 	t.Parallel()
 	_, files := parsePackage(t)
 
-	banned := []string{"os", "io/fs", "io/ioutil", "path/filepath", "embed", "os/exec", "github.com/zssvaidar/kpv/agent/internal/pipeline"}
+	// internal/process is banned beside os/exec: a route never starts a
+	// process, not even a fixed-table one (#37).
+	banned := []string{"os", "io/fs", "io/ioutil", "path/filepath", "embed", "os/exec", "github.com/zssvaidar/kpv/agent/internal/process", "github.com/zssvaidar/kpv/agent/internal/pipeline"}
 	for name, file := range files {
 		for _, path := range importsOf(t, file) {
 			for _, forbidden := range banned {
 				if path == forbidden {
-					t.Errorf("%s imports %s, so a route here could reach the filesystem without going through the path guard in internal/projectfs", name, path)
+					t.Errorf("%s imports %s, so a route here could reach the filesystem without going through the path guard in internal/projectfs, or start a process", name, path)
 				}
 			}
 		}
