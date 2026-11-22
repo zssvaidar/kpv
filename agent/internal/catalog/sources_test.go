@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 )
 
@@ -152,9 +151,7 @@ func TestEveryWayASourceFileIsNotThereOrNotAFile(t *testing.T) {
 	write(t, filepath.Join(dir, "latin1.py"), "caf\xe9\n")
 	write(t, filepath.Join(dir, "nul.py"), "a\x00b\n")
 	mkdir(t, filepath.Join(dir, "folder"))
-	if err := syscall.Mkfifo(filepath.Join(dir, "fifo"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mkfifo(t, filepath.Join(dir, "fifo"))
 	// Links that stay inside the pipeline directory and the root are refused
 	// all the same.
 	if err := os.Symlink(filepath.Join(dir, "src", "main.py"), filepath.Join(dir, "file-link.py")); err != nil {
@@ -516,9 +513,7 @@ func TestAWriteHasEveryRefusalTheReadHas(t *testing.T) {
 	// before the FIFO is made and compared after it is removed.
 	before := snapshot(t, root)
 	fifo := filepath.Join(dir, "fifo")
-	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mkfifo(t, fifo)
 	for name, test := range map[string]struct {
 		location Location
 		path     string

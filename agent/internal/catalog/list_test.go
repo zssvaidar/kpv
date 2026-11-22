@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -216,9 +215,7 @@ func TestAFileThatIsNotAPlainSmallFileIsNotRead(t *testing.T) {
 	}
 	mkdir(t, filepath.Join(root, "directory", FileName))
 	mkdir(t, filepath.Join(root, "fifo"))
-	if err := syscall.Mkfifo(filepath.Join(root, "fifo", FileName), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mkfifo(t, filepath.Join(root, "fifo", FileName))
 
 	got := listed(t, w.catalog.List(), root)
 	for name, want := range map[string]UnreadableKind{

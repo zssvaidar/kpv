@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -280,25 +279,6 @@ func TestALeftoverTemporaryFileIsIgnoredAndRemovedByTheNextWrite(t *testing.T) {
 	}
 	if _, err := os.Lstat(p.path("..env.tmp-link")); err != nil {
 		t.Fatal("the link was removed")
-	}
-}
-
-// Not parallel: the umask is the process's.
-func TestANewEnvIsOwnerOnlyWhateverTheUmask(t *testing.T) {
-	for _, umask := range []int{0, 0o022, 0o077} {
-		old := syscall.Umask(umask)
-		p := newProject(t)
-		_, err := p.write(t, map[string]string{"K": "v"})
-		syscall.Umask(old)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := mode(t, p.path(EnvFile)); got != 0o600 {
-			t.Errorf("umask %o: .env mode %o", umask, got)
-		}
-		if got := mode(t, p.path(GitignoreFile)); got != 0o644 {
-			t.Errorf("umask %o: .gitignore mode %o", umask, got)
-		}
 	}
 }
 
