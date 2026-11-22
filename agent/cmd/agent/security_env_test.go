@@ -44,7 +44,7 @@ func (f *fixture) envAndGitignore(t *testing.T) {
 	}
 	got = f.call(t, "PUT", "/api/pipelines/source", map[string]any{"root": f.root, "directory": f.directory, "path": "env",
 		"text": "KPV_WRITTEN=1\n", "expectedAbsent": true})
-	if errorKind(got) != "link" && errorKind(got) != "exists" {
+	if errorKind(got) != "link" {
 		t.Errorf("writing a link named env to .env answered %d %s, want link", got.status, got.body)
 	}
 
