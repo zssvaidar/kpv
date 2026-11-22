@@ -24,9 +24,13 @@ comment in `process.go` gives the reasons; these are the rules, and
   why a child's arguments come only from the table.
   `TestTheCommandScanCatchesEveryPlantedViolation` feeds each of these to the
   same scan
-- this package is also type checked (`processTypeViolations`, go/types with
-  the compiler's export data, for the files that build on the test's
-  platform), against allowlists rather than bans:
+- a file here carries no build constraint, `//go:build unix` or
+  `//go:build !unix`, and nothing else: no other tag (`cgo`, `linux && cgo`,
+  a custom `-tags` name), no `// +build` line and no `_<GOOS>` or
+  `_<GOARCH>` file name. So there are two file sets, and both are type
+  checked (`processTypeViolations`, go/types with the compiler's export data
+  for the standard library the test runs with), against allowlists rather
+  than bans:
   - it may import only `bytes`, `context`, `errors`, `fmt`, `os`, `os/exec`,
     `path/filepath`, `strings`, `sync`, `syscall` and `time`, so `reflect`,
     `unsafe`, `plugin` and cgo's `"C"` fail by being absent. It declares no
@@ -39,30 +43,49 @@ comment in `process.go` gives the reasons; these are the rules, and
   - `exec.CommandContext` appears once, as the callee of a call, in `Run`;
     as a value it fails. Every `*exec.Cmd` value and every use of the name
     `exec.Cmd` is inside `Run` (the process group's attributes come from
-    `processGroup()` in `group_unix.go`, so no helper holds the command). No
-    expression has type `exec.Cmd` anywhere, so a literal, a copy (`d := *c`)
-    or a dereference fails, and so does `new(exec.Cmd)`
+    `processGroup()`, so no helper holds the command). No expression has type
+    `exec.Cmd` anywhere, so a literal, a copy (`d := *c`) or a dereference
+    fails, and so does `new(exec.Cmd)`
   - of `exec.Cmd`'s fields and methods it selects only `Args` (as
     `Args[...]`), `Env`, `Dir`, `Stdin`, `Stdout`, `Stderr`, `WaitDelay`,
     `SysProcAttr`, `Cancel`, `Process`, `ProcessState`, `Start` and `Wait`,
     through an embedding too, so the command cannot be pointed at another
-    `Path` or started by `Run` or `Output`
+    `Path` or started by `Run` or `Output`. `Start` and `Wait` only as the
+    callee of a call (no method value or expression), `Cancel` only as an
+    assignment's target
+  - nothing made in `Run` can leave it: the package's one function literal is
+    the command's `Cancel` assigned in `Run` (the stdout cap holds the
+    run's cancel function, not a closure), and nothing reads `Cancel` back.
+    No package-level variable can hold a function (no func, chan, pointer or
+    non-`error` interface in its type), none is written to after its
+    declaration (assignment, `++`, `range`) and none has its address taken
   - a file that does not type check fails.
-    `TestTheTypedProcessScanCatchesEveryPlantedRoute` plants each of QA's round-2 routes (the function value,
-    the generic zero value, `reflect.New`, the dereferenced copy) and the
-    others above next to the shipped files
-  - not seen: the files that build only elsewhere (`group_other.go` on unix)
-    are type checked only on such a platform, and both halves are still held
-    by the syntax scan
+    `TestTheTypedProcessScanCatchesEveryPlantedRoute` (round 2) and
+    `TestTheTypedProcessScanCatchesEveryRoundFourRoute` plant each route
+    review found next to the shipped files, among them a closure in `Run`
+    handing the call to an exported variable, and `cgo`, `linux && cgo` and
+    custom-tagged files
+  - not seen: the non-unix set is checked against the standard library of the
+    platform the test runs on, not that of Windows; `GOOS=windows go vet`
+    covers the rest. A string built at run time is not seen by the literal
+    ban; a child's arguments come only from the table
 - module-wide, in every file test files included,
-  `TestNoFileInTheModuleReachesAProcessAnotherWay` refuses `import "C"` (cgo, whose `C.system` runs a
-  shell), `net/http/cgi` (its `Handler` runs the program it names) and
-  `plugin`, refuses `go/build` and `go/importer` (both run the go command)
-  outside test files, where the boundary test uses `go/importer` to type
-  check, and refuses any non-Go source the go command would build into a
-  package (`.s`, `.S`, `.sx`, `.c`, `.cc`, `.cxx`, `.cpp`, `.m`, `.h`, `.hh`,
-  `.hpp`, `.hxx`, `.f`, `.F`, `.for`, `.f90`, `.swig`, `.swigcxx`, `.syso`),
-  since none of the scans read it
+  `TestNoFileInTheModuleReachesAProcessAnotherWay` refuses `import "C"` (cgo,
+  whose `C.system` runs a shell), `net/http/cgi` (its `Handler` runs the
+  program it names) and `plugin`, refuses `go/build` and `go/importer` (both
+  run the go command) outside test files, where the boundary test uses
+  `go/importer` to type check, and refuses any non-Go source the go command
+  would build into a package (`.s`, `.S`, `.sx`, `.c`, `.cc`, `.cxx`, `.cpp`,
+  `.m`, `.h`, `.hh`, `.hpp`, `.hxx`, `.f`, `.F`, `.for`, `.f90`, `.swig`,
+  `.swigcxx`, `.syso`), since none of the scans read it. The module-wide
+  syntax scans read every `.go` file whatever its build constraint
+- the walks skip `testdata` and `.`-prefixed directories, so
+  `TestEveryPackageTheGoCommandBuildsIsScanned` refuses one that holds a
+  `.go` file anywhere under it (a `testdata` with only fixtures is fine), and
+  any symbolic link to a directory, which the walks do not follow. It then
+  runs `go list -deps -test ./...` and fails on any module directory the go
+  command builds that the walk did not read.
+  `TestTheWalkRefusesEveryPlantedHidingPlace` plants each in a scratch module
 - this package imports no other agent package (`source_test.go`)
 - `Run(ctx, program, stdin)` runs only a `Program`, whose fields are
   unexported. Every non-test `Program` comes from the table in `programs.go`

@@ -166,7 +166,7 @@ func Run(ctx context.Context, program Program, stdin []byte) (Output, error) {
 	running, stop := context.WithCancelCause(timed)
 	defer stop(nil)
 
-	stdout := &cappedBuffer{limit: program.limits.MaxStdout, exceeded: func() { stop(errStdoutTooLarge) }}
+	stdout := &cappedBuffer{limit: program.limits.MaxStdout, stop: stop}
 	stderr := &retainedBuffer{}
 
 	command := exec.CommandContext(running, path, program.args...)
@@ -274,15 +274,15 @@ func environment(names []string) []string {
 	return out
 }
 
-// cappedBuffer keeps stdout up to its limit. The first byte past it calls
-// exceeded, which kills the child, and everything after is discarded so the
-// child is never blocked writing.
+// cappedBuffer keeps stdout up to its limit. The first byte past it cancels
+// the run with errStdoutTooLarge, which kills the child, and everything after
+// is discarded so the child is never blocked writing.
 type cappedBuffer struct {
-	mu       sync.Mutex
-	limit    int64
-	buffer   bytes.Buffer
-	over     bool
-	exceeded func()
+	mu     sync.Mutex
+	limit  int64
+	buffer bytes.Buffer
+	over   bool
+	stop   context.CancelCauseFunc
 }
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
@@ -294,7 +294,7 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	if int64(b.buffer.Len())+int64(len(p)) > b.limit {
 		b.over = true
 		b.buffer = bytes.Buffer{}
-		b.exceeded()
+		b.stop(errStdoutTooLarge)
 		return len(p), nil
 	}
 	b.buffer.Write(p)
