@@ -18,6 +18,14 @@ import {
   ValidateNode,
 } from './BlockNode.tsx';
 import css from './blocks.css?raw';
+import type { CodeView } from './source-buffer.ts';
+import {
+  codeView,
+  codeWords,
+  edited,
+  loadedSource,
+  sourceRefusalWords,
+} from './source-buffer.ts';
 
 // One block of every type, straight from the pipeline model: the shared
 // every-block-type fixture, validated by @kpv/schema. The unsupported-code
@@ -324,4 +332,238 @@ describe('legibility in both schemes', () => {
       declarations(".block-node[data-type='unsupportedCode']"),
     ).toMatchObject({ 'border-style': 'dashed' });
   });
+});
+
+// The code panel a custom-code node holds (#14).
+
+const step = blockOf('customCode');
+const where = {
+  kind: 'file',
+  path: 'src/discounts.go',
+  symbol: 'ApplyDiscounts',
+} as const;
+const readFile = (text: string, generated = false) =>
+  loadedSource({ text, sha256: 'a'.repeat(64), generated });
+const drawCode = (code: CodeView, scheme: Scheme = 'light') =>
+  inScheme(scheme, <CustomCodeNode block={step} code={code} />);
+const panelOf = (html: string) =>
+  /<section class="code-panel".*<\/section>/s.exec(html)?.[0] ?? '';
+
+describe('the code panel of a custom-code node', () => {
+  const views: Record<string, CodeView> = {
+    'an opened file': codeView(
+      where,
+      readFile('func ApplyDiscounts() {}\n'),
+      'go',
+      null,
+    ),
+    'an empty file': codeView(where, readFile(''), 'go', null),
+    'a missing file': codeView(where, loadedSource(null), 'go', null),
+    'a generated file': codeView(
+      where,
+      readFile('package gen\n', true),
+      'go',
+      null,
+    ),
+    'unsaved code': codeView(where, edited(readFile('a\n'), 'b\n'), 'go', null),
+    'a refused read': codeView(
+      where,
+      { status: 'refused', error: { error: 'link', message: 'link' } },
+      'go',
+      null,
+    ),
+    'no reference': codeView({ kind: 'none' }, undefined, 'go', null),
+    'no file to read': { kind: 'noFile' },
+  };
+
+  for (const [name, view] of Object.entries(views)) {
+    for (const scheme of schemes) {
+      it(`renders ${name} to a string in the ${scheme} scheme`, () => {
+        const html = drawCode(view, scheme);
+        expect(html).toContain(`color-scheme:${scheme}`);
+        // The card is drawn as it always is, the panel after it.
+        expect(html).toContain(
+          '<div class="block-node" data-type="customCode"',
+        );
+        expect(html).toMatch(/<\/div><section class="code-panel"/);
+        expect(html).toMatchSnapshot();
+      });
+    }
+  }
+
+  it('mounts the editor only in an effect: a string render has its empty host and no text', () => {
+    const html = drawCode(views['an opened file'] as CodeView);
+    expect(html).toContain(
+      '<div class="code-editor nodrag nopan nowheel nokey" data-language="go"></div>',
+    );
+    expect(html).not.toContain('func ApplyDiscounts');
+  });
+
+  it('names the file and the symbol above the editor', () => {
+    const html = drawCode(views['an opened file'] as CodeView);
+    expect(html).toMatch(/src\/discounts\.go.*ApplyDiscounts.*code-editor/s);
+  });
+
+  it('says a block with no reference names no file, with no editor', () => {
+    const html = panelOf(drawCode(views['no reference'] as CodeView));
+    expect(html).toContain(codeWords.noReference);
+    expect(html).not.toContain('code-editor');
+  });
+
+  it('says there is no file to read without a code view, and draws no editor', () => {
+    const html = renderToStaticMarkup(<CustomCodeNode block={step} />);
+    expect(html).toContain(codeWords.noFile);
+    expect(html).not.toContain('code-editor');
+    expect(renderToStaticMarkup(<BlockNodeView block={step} />)).toBe(html);
+  });
+
+  it('shows an empty file as an editor, and a missing one as one marked not existing yet', () => {
+    const empty = panelOf(drawCode(views['an empty file'] as CodeView));
+    expect(empty).toContain('code-editor');
+    expect(empty).not.toContain(codeWords.missing);
+    const missing = panelOf(drawCode(views['a missing file'] as CodeView));
+    expect(missing).toContain('code-editor');
+    expect(missing).toContain(codeWords.missing);
+    expect(missing).toContain('>Create file</button>');
+  });
+
+  it('shows a generated file read-only, with no save control', () => {
+    const html = panelOf(drawCode(views['a generated file'] as CodeView));
+    expect(html).toContain(codeWords.generated);
+    expect(html).toContain('data-readonly=""');
+    expect(html).not.toContain('>Save</button>');
+  });
+
+  it("shows a refusal's sentence and no editor", () => {
+    const html = panelOf(drawCode(views['a refused read'] as CodeView));
+    expect(html).toContain(sourceRefusalWords.link);
+    expect(html).not.toContain('code-editor');
+    expect(html).toContain('>Reload</button>');
+  });
+
+  it('marks unsaved code, and enables Save only then', () => {
+    const dirty = drawCode(views['unsaved code'] as CodeView);
+    expect(dirty).toContain('class="custom-code-node" data-unsaved=""');
+    expect(dirty).toContain(`>${codeWords.unsaved}</span>`);
+    expect(dirty).toMatch(
+      /<button type="button" class="nodrag">Save<\/button>/,
+    );
+    const clean = drawCode(views['an opened file'] as CodeView);
+    expect(clean).not.toContain('data-unsaved');
+    expect(clean).toMatch(/<button[^>]*disabled=""[^>]*>Save<\/button>/);
+  });
+
+  it('disables Save while disconnected, with the connection state as the reason', () => {
+    const offline = codeView(
+      where,
+      edited(readFile('a\n'), 'b\n'),
+      'go',
+      'Agent not reachable',
+    );
+    const html = drawCode(offline);
+    const reason =
+      /<button[^>]*disabled=""[^>]*aria-describedby="([^"]+)"[^>]*>Save/.exec(
+        html,
+      )?.[1];
+    expect(reason).toBeDefined();
+    expect(html).toContain(
+      `id="${reason}">Save unavailable: Agent not reachable</span>`,
+    );
+  });
+
+  it('says the file changed on disk and offers to reload, never to overwrite', () => {
+    const view = codeView(
+      where,
+      { ...edited(readFile('a\n'), 'b\n'), failure: { kind: 'changed' } },
+      'go',
+      null,
+    );
+    const html = drawCode(view);
+    expect(html).toContain(codeWords.changed);
+    expect(html).toContain('>Reload</button>');
+    expect(html).not.toMatch(/overwrite/i);
+  });
+
+  it('hangs below the card at its width, and draws larger over the canvas when expanded', () => {
+    expect(declarations('.custom-code-node')).toMatchObject({
+      position: 'relative',
+      width: '100%',
+      height: '100%',
+    });
+    expect(declarations('.code-panel')).toMatchObject({
+      position: 'absolute',
+      top: 'calc(100% + 0.375rem)',
+      left: '0',
+      width: '100%',
+    });
+    expect(declarations('.code-panel[data-expanded]')).toMatchObject({
+      width: '720px',
+    });
+    expect(
+      declarations('.code-panel[data-expanded] .code-editor'),
+    ).toMatchObject({ height: '480px' });
+    expect(
+      declarations('.react-flow__node:has(.code-panel[data-expanded])'),
+    ).toMatchObject({ 'z-index': '1000 !important' });
+    // A long line scrolls inside: the editor never grows past its box.
+    expect(declarations('.code-editor')).toMatchObject({
+      width: '100%',
+      'min-width': '0',
+      overflow: 'hidden',
+    });
+    expect(declarations('.code-panel .code-editor .cm-scroller')).toMatchObject(
+      {
+        overflow: 'auto',
+      },
+    );
+  });
+});
+
+describe('the code panel in both schemes', () => {
+  const panel = declarations('.code-panel');
+  const tokenRules = rules().filter((rule) =>
+    rule.selector.startsWith('.code-panel .tok-'),
+  );
+
+  it('colours the highlighting it has', () => {
+    expect(tokenRules.map((rule) => rule.selector)).toEqual(
+      expect.arrayContaining([
+        '.code-panel .tok-keyword',
+        '.code-panel .tok-string',
+        '.code-panel .tok-comment',
+        '.code-panel .tok-number',
+        '.code-panel .tok-typeName',
+      ]),
+    );
+  });
+
+  for (const scheme of schemes) {
+    const surface = inSchemeColour(panel['--code-surface'], scheme);
+    const ink = inSchemeColour(panel['--code-ink'], scheme);
+
+    it(`keeps the code, its gutter and every token readable in the ${scheme} scheme`, () => {
+      expect(contrast(ink, surface)).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(inSchemeColour(panel['--code-muted'], scheme), surface),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(
+          inSchemeColour(panel['--code-muted'], scheme),
+          inSchemeColour(panel['--code-gutter'], scheme),
+        ),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(ink, inSchemeColour(panel['--code-selection'], scheme)),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(inSchemeColour(panel['--code-border'], scheme), surface),
+      ).toBeGreaterThanOrEqual(3);
+      for (const rule of tokenRules) {
+        expect(
+          contrast(inSchemeColour(rule.declarations.color, scheme), surface),
+          rule.selector,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  }
 });

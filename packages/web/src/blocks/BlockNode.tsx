@@ -15,10 +15,19 @@
 // colours apart. A node fills the box the graph gives it and nothing in it can
 // grow that box: a long name is cut short with an ellipsis (the whole name is
 // its tooltip), and a missing one is replaced by words saying so.
+//
+// A custom-code node also holds the code its step's file has (#14), in a
+// panel hanging below the card at the card's width, so the card keeps the
+// footprint every node has and the edges still meet it at its middle. The
+// panel is controlled like the rest: it is handed what to show (a CodeView,
+// source-buffer.ts) and reports what is typed, saved or reloaded; the shell
+// reads and writes the file. Without a CodeView it says there is no file to
+// read, which is what a pipeline not opened from disk shows.
 
 import './blocks.css';
 
 import type { ReactNode } from 'react';
+import { useId, useState } from 'react';
 
 import type {
   CustomCodeStep,
@@ -28,6 +37,10 @@ import type {
   TransformStep,
   ValidateStep,
 } from '@kpv/schema';
+
+import { CodeEditor } from './CodeEditor.tsx';
+import type { CodeView } from './source-buffer.ts';
+import { codeWords } from './source-buffer.ts';
 
 /**
  * The opaque block an imported pipeline wraps unrecognised code in, keeping
@@ -158,8 +171,153 @@ export function ValidateNode(props: BlockNodeProps<ValidateStep>) {
   return <BlockCard {...props} />;
 }
 
-export function CustomCodeNode(props: BlockNodeProps<CustomCodeStep>) {
-  return <BlockCard {...props} />;
+/** What a custom-code node reports up about its code; the shell acts. */
+export interface CodeActions {
+  onChange: (path: string, text: string) => void;
+  onSave: (path: string) => void;
+  onReload: (path: string) => void;
+}
+
+export interface CustomCodeNodeProps extends BlockNodeProps<CustomCodeStep> {
+  /** What its code panel shows; no file to read when there is none. */
+  code?: CodeView;
+  actions?: CodeActions;
+}
+
+/** Nothing to report to: a node drawn with no owner of its code. */
+const noActions: CodeActions = {
+  onChange: () => undefined,
+  onSave: () => undefined,
+  onReload: () => undefined,
+};
+
+export function CustomCodeNode(props: CustomCodeNodeProps) {
+  const { code = { kind: 'noFile' }, actions = noActions, ...card } = props;
+  return (
+    <div
+      className="custom-code-node"
+      data-unsaved={code.kind === 'editor' && code.unsaved ? '' : undefined}
+    >
+      <BlockCard {...card} />
+      <CodePanel code={code} actions={actions} />
+    </div>
+  );
+}
+
+/**
+ * The code below a custom-code card. Expanded, it is drawn larger over the
+ * canvas (blocks.css says the size) without moving any other node; it stays
+ * the same editor either way, so its text, cursor, selection and undo
+ * history are kept.
+ */
+function CodePanel(props: { code: CodeView; actions: CodeActions }) {
+  const { code, actions } = props;
+  const [expanded, setExpanded] = useState(false);
+  const reasonId = useId();
+  if (code.kind === 'noReference' || code.kind === 'noFile') {
+    return (
+      <section className="code-panel" data-state={code.kind}>
+        <p className="code-message">{codeWords[code.kind]}</p>
+      </section>
+    );
+  }
+  const { path } = code;
+  const editor = code.kind === 'editor' ? code : null;
+  return (
+    <section
+      className="code-panel"
+      data-state={code.kind}
+      data-expanded={expanded ? '' : undefined}
+      aria-label={`Code in ${path}`}
+    >
+      <div className="code-head">
+        <code className="code-path" title={path}>
+          {path}
+        </code>
+        {editor?.unsaved === true ? (
+          <span className="code-unsaved">{codeWords.unsaved}</span>
+        ) : null}
+        {editor === null ? null : (
+          <button
+            type="button"
+            className="code-expand nodrag"
+            aria-pressed={expanded}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+        )}
+      </div>
+      {code.symbol === undefined ? null : (
+        <p className="code-symbol">
+          Symbol <code>{code.symbol}</code>
+        </p>
+      )}
+      {code.kind === 'loading' ? (
+        <p className="code-message">{codeWords.loading}</p>
+      ) : null}
+      {code.kind === 'refused' ? (
+        <p className="code-message" role="alert">
+          {code.sentence}
+        </p>
+      ) : null}
+      {editor === null ? null : (
+        <>
+          {editor.generated ? (
+            <p className="code-message">{codeWords.generated}</p>
+          ) : null}
+          {editor.missing ? (
+            <p className="code-message">{codeWords.missing}</p>
+          ) : null}
+          {editor.notice === null ? null : (
+            <p className="code-message" role="alert">
+              {editor.notice}
+            </p>
+          )}
+          <CodeEditor
+            key={path}
+            text={editor.text}
+            language={editor.language}
+            readOnly={editor.generated}
+            label={`Code in ${path}`}
+            onChange={(text) => actions.onChange(path, text)}
+          />
+        </>
+      )}
+      {code.kind === 'loading' ? null : (
+        <div className="code-actions">
+          {editor === null || editor.generated ? null : (
+            <button
+              type="button"
+              className="nodrag"
+              disabled={editor.saveBlocked !== null}
+              aria-describedby={
+                editor.saveBlocked === null ? undefined : reasonId
+              }
+              onClick={() => actions.onSave(path)}
+            >
+              {editor.missing ? 'Create file' : 'Save'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="nodrag"
+            disabled={editor?.saving === true}
+            onClick={() => actions.onReload(path)}
+          >
+            Reload
+          </button>
+          {editor === null ||
+          editor.generated ||
+          editor.saveBlocked === null ? null : (
+            <span className="code-reason" id={reasonId}>
+              {editor.saveBlocked}
+            </span>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function KafkaDestinationNode(
@@ -176,8 +334,14 @@ export function UnsupportedCodeNode(
 }
 
 /** The node component for whatever block it is handed. */
-export function BlockNodeView(props: BlockNodeProps<DrawableBlock>) {
-  const { block, status } = props;
+export function BlockNodeView(
+  props: BlockNodeProps<DrawableBlock> & {
+    /** A custom-code block's code, and where what is typed goes. */
+    code?: CodeView;
+    actions?: CodeActions;
+  },
+) {
+  const { block, status, code, actions } = props;
   switch (block.type) {
     case 'kafkaSource':
       return <KafkaSourceNode block={block} status={status} />;
@@ -188,7 +352,14 @@ export function BlockNodeView(props: BlockNodeProps<DrawableBlock>) {
     case 'validate':
       return <ValidateNode block={block} status={status} />;
     case 'customCode':
-      return <CustomCodeNode block={block} status={status} />;
+      return (
+        <CustomCodeNode
+          block={block}
+          status={status}
+          {...(code === undefined ? {} : { code })}
+          {...(actions === undefined ? {} : { actions })}
+        />
+      );
     case 'kafkaDestination':
       return <KafkaDestinationNode block={block} status={status} />;
     case 'unsupportedCode':

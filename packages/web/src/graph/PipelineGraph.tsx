@@ -14,7 +14,12 @@
 // dropped the moment the drag ends. Which node is selected is handed in and
 // reported out, like the pipeline.
 //
-// Each node is drawn by the block's own component (#10).
+// Each node is drawn by the block's own component (#10). A custom-code node
+// also shows its step's file (#14): the shell hands in `code`, the buffers it
+// owns, and each node reads only its own path's buffer from it, so typing in
+// one editor redraws only the nodes showing that file. The editor hangs
+// below the card, outside the fixed node box the layout and the drop slots
+// use, and nothing in it reaches the graph: no key, wheel or drag.
 
 import '@xyflow/react/dist/style.css';
 import './graph.css';
@@ -32,11 +37,23 @@ import {
   Position,
   ReactFlow,
 } from '@xyflow/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
-import type { Pipeline } from '@kpv/schema';
+import type { CustomCodeStep, Language, Pipeline } from '@kpv/schema';
 
+import type { CodeActions } from '../blocks/BlockNode.tsx';
 import { BlockNodeView } from '../blocks/BlockNode.tsx';
+import type { SourceBuffer } from '../blocks/source-buffer.ts';
+import { codeView, stepSource } from '../blocks/source-buffer.ts';
 
 import type { DragEnd } from './drag.ts';
 import { dragResult } from './drag.ts';
@@ -45,6 +62,48 @@ import { deleteStep } from './edit.ts';
 import type { BlockNode } from './layout.ts';
 import { blockForNode, blockRef, layoutPipeline } from './layout.ts';
 import { nodeHeight, nodeWidth } from './geometry.ts';
+
+/**
+ * The source files the custom-code nodes show, from whoever owns them (the
+ * shell). Without it every custom-code node says there is no file to read.
+ */
+export interface CodeSources extends CodeActions {
+  subscribe: (listener: () => void) => () => void;
+  /** The buffer of one path, the same object until it changes. */
+  buffer: (path: string) => SourceBuffer | undefined;
+  /** The pipeline's language, which picks the highlighting. */
+  language: Language;
+  /** The connection state's words while a save cannot be sent, else null. */
+  offline: string | null;
+}
+
+const CodeContext = createContext<CodeSources | null>(null);
+
+const noSubscription = () => () => undefined;
+
+/** A custom-code block's node, showing its own path's buffer. */
+function CustomCodeBlock(props: { step: CustomCodeStep }) {
+  const { step } = props;
+  const sources = useContext(CodeContext);
+  const source = stepSource(step) ?? { kind: 'none' as const };
+  const path = source.kind === 'file' ? source.path : null;
+  const buffer = useSyncExternalStore(
+    sources?.subscribe ?? noSubscription,
+    () => (sources === null || path === null ? null : sources.buffer(path)),
+    () => (sources === null || path === null ? null : sources.buffer(path)),
+  );
+  const view = codeView(
+    source,
+    sources === null ? null : buffer,
+    sources?.language ?? 'python',
+    sources?.offline ?? null,
+  );
+  return sources === null ? (
+    <BlockNodeView block={step} code={view} />
+  ) : (
+    <BlockNodeView block={step} code={view} actions={sources} />
+  );
+}
 
 /**
  * A block's node on the graph: its block component (#10) between the handles
@@ -65,7 +124,11 @@ function GraphBlockNode(props: NodeProps<BlockNode>) {
           className="block-handle"
         />
       )}
-      <BlockNodeView block={data.block} />
+      {data.block.type === 'customCode' ? (
+        <CustomCodeBlock step={data.block} />
+      ) : (
+        <BlockNodeView block={data.block} />
+      )}
       {data.role === 'destination' ? null : (
         <Handle
           type="source"
@@ -160,8 +223,10 @@ export function PipelineGraph(props: {
   onSelect: (id: string | null) => void;
   /** Every edit made on the graph, accepted or rejected. */
   onEdit: (result: EditResult) => void;
+  /** The custom-code nodes' files, for a pipeline opened from disk. */
+  code?: CodeSources;
 }) {
-  const { pipeline, selected, onSelect, onEdit } = props;
+  const { pipeline, selected, onSelect, onEdit, code = null } = props;
   const layout = useMemo(() => layoutPipeline(pipeline), [pipeline]);
   // The step being dragged and its x right now. `cancelled` holds it back
   // after escape until the pointer is let go, so the rest of that drag
@@ -174,6 +239,13 @@ export function PipelineGraph(props: {
     if (!dragging) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // Escape typed in a code editor is the editor's.
+      if (
+        event.target instanceof Element &&
+        event.target.closest('.code-editor') !== null
+      ) {
+        return;
+      }
       cancelled.current = true;
       setDrag(null);
     };
@@ -237,21 +309,23 @@ export function PipelineGraph(props: {
     [pipeline, onEdit],
   );
   return (
-    <div className="pipeline-graph" data-pipeline={pipeline.id} ref={canvas}>
-      <ReactFlow<BlockNode>
-        nodes={nodes}
-        edges={layout.edges}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDragStop={onNodeDragStop}
-        fitView
-        minZoom={minZoom}
-        {...editProps}
-      >
-        <Background />
-        <Controls showInteractive={false} />
-      </ReactFlow>
-    </div>
+    <CodeContext.Provider value={code}>
+      <div className="pipeline-graph" data-pipeline={pipeline.id} ref={canvas}>
+        <ReactFlow<BlockNode>
+          nodes={nodes}
+          edges={layout.edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDragStop={onNodeDragStop}
+          fitView
+          minZoom={minZoom}
+          {...editProps}
+        >
+          <Background />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </div>
+    </CodeContext.Provider>
   );
 }

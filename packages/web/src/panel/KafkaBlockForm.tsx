@@ -337,23 +337,30 @@ export function KafkaBlockForm(props: {
 /**
  * Says which blocks hold unsaved changes when another block is selected, so
  * moving away from a form never hides that it was left dirty: a Kafka block
- * here (#12), or a filter, transform or validate step (#13).
+ * here (#12), or a filter, transform or validate step (#13), and a
+ * custom-code block whose file holds unsaved code (#14).
  */
 export function UnsavedElsewhere(props: {
   pipeline: Pipeline;
   /** The node ids of those blocks, as layout.ts names them. */
   nodes: readonly string[];
+  /** The custom-code blocks whose file holds unsaved code (#14). */
+  codeNodes?: readonly string[];
   onShow: (node: string) => void;
 }) {
-  const shown = props.nodes.flatMap((node) => {
+  const placedOf = (kind: 'form' | 'code') => (node: string) => {
     const placed = blockForNode(props.pipeline, node);
-    return placed === null ? [] : [{ node, placed }];
-  });
+    return placed === null ? [] : [{ node, placed, kind }];
+  };
+  const shown = [
+    ...props.nodes.flatMap(placedOf('form')),
+    ...(props.codeNodes ?? []).flatMap(placedOf('code')),
+  ];
   if (shown.length === 0) return null;
   return (
     <div className="unsaved-elsewhere" role="status">
-      {shown.map(({ node, placed }) => (
-        <p key={node} data-unsaved={node}>
+      {shown.map(({ node, placed, kind }) => (
+        <p key={`${kind}:${node}`} data-unsaved={node} data-kind={kind}>
           The {blockKindLabel[placed.block.type]}
           {placed.role === 'step' ? (
             <>
@@ -361,7 +368,9 @@ export function UnsavedElsewhere(props: {
               step <code>{placed.block.id}</code>
             </>
           ) : null}{' '}
-          has unsaved changes, kept until you save or discard them.{' '}
+          {kind === 'code'
+            ? 'has unsaved code, kept until you save it or reload its file.'
+            : 'has unsaved changes, kept until you save or discard them.'}{' '}
           <button type="button" onClick={() => props.onShow(node)}>
             Show
           </button>

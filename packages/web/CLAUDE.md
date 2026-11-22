@@ -66,6 +66,25 @@ Rules a change can break
   the pipeline directory, for #14's editor. `SourceWrite` holds by its type
   that a write has exactly one of `expectedSha256` (the hash the read
   answered) and `expectedAbsent`; a `changed` error carries the current hash
+- a custom-code node shows its step's `customCode.path` in a CodeMirror 6
+  editor (#14; only a `customCode` step, highlighting by the pipeline's
+  `language`). The node is controlled (`blocks/BlockNode.tsx`,
+  `blocks/CodeEditor.tsx`): the shell owns one buffer per path
+  (`shell/sources.ts`), reads each path once when an opened pipeline is drawn
+  and again only on Reload, and writes only on Save with the hash read. The
+  model is pure and tested without a DOM (`blocks/source-buffer.ts`): unsaved
+  is judged by what a save would write (a lone surrogate counts as U+FFFD, as
+  the agent's decoder writes it), and `textToWrite` keeps each unchanged
+  line's own ending, so CRLF and a missing final newline survive. The editor
+  hangs below the card, outside the node box `geometry.ts` gives; expanded it
+  is 720px wide and its editor 480px tall, over the canvas. Its host carries
+  `nodrag nopan nowheel nokey` and stops its keydowns, so nothing typed in it
+  reaches the graph. Arrow up/down and Page Up/Down are `lineMotion`, not
+  CodeMirror's: zoomed out a line is under 2 screen pixels and CodeMirror
+  6.43's `moveVertically` loops forever (`textHeight >> 1` is 0). Deleting the
+  last step naming unsaved code, going back to the list and Reload ask first
+  (`confirm`); an opened pipeline stays drawn while disconnected, Save
+  disabled with the connection state as the reason
 - `src/connection/monitor.ts` holds the connection state the status bar shows.
   The channel WebSocket is the liveness signal; on a drop one request says why,
   and it reconnects with backoff (`backoff.ts`: 250ms doubling to 10s) unless
@@ -93,3 +112,19 @@ Development (`pnpm dev`, `dev/`)
   browser driver is a dependency of the workspace (`package.json`,
   `pnpm-lock.yaml`), and adding one is not part of a check. Where `pnpm dev`
   keeps its store is in `agent/CLAUDE.md` (Startup lines)
+- 50 custom-code editors, measured by hand (#14): a pipeline of 51
+  custom-code steps (50 with an editor: two sharing a file, one generated,
+  one missing, one CRLF, the rest 52-line Python files with one line 344
+  characters long; one with no reference) opened through `pnpm dev` with `HOME` and
+  `XDG_CONFIG_HOME` scratch, in headless Chrome 1600x1000 driven by
+  `puppeteer-core`. Keystroke to paint is the Event Timing API's `duration`
+  of each `keydown` (to the next frame presented), checked against a
+  `requestAnimationFrame` then `setTimeout` stamp, over 80 keys 60ms apart in
+  one editor. Fitted to the view (zoom 0.087, all 50 editors on screen) the
+  median was 40-112ms and the 95th percentile 64-144ms across runs on a host
+  under load average 5-11; zoomed to 0.26 (26 on screen) the median was
+  24-72ms. Script per keydown stayed under 1ms (median 0.3ms); the rest is
+  style, layout and software paint. Typing in a plain text input on the same
+  page measured a median of 75ms in the same conditions. Panning by a mouse
+  drag of the pane over 60 moves gave frames of median 16.7ms, 95th
+  percentile 33ms. This is the dev server's development React build

@@ -7,7 +7,10 @@ import { fakeAgent, json } from '../picker/fake-agent.ts';
 import { createPipelinesController } from '../pipelines/controller.ts';
 import { fixtureList, pipelinesFixtures } from '../pipelines/fixtures.ts';
 import { pipelinesErrorTitles, unreadableWords } from '../pipelines/words.ts';
-import { App, Shell } from './App.tsx';
+import { codeWords } from '../blocks/source-buffer.ts';
+import { graphFixtures } from '../graph/fixtures.ts';
+import { App, discardQuestion, Shell } from './App.tsx';
+import { createSourcesController } from './sources.ts';
 
 // What a person reads, without the markup: React escapes quotes in text.
 const text = (html: string) =>
@@ -206,5 +209,97 @@ describe('the way to the connection screen (#24)', () => {
     );
     expect(html).not.toContain('Kafka connections</h1>');
     expect(html).toContain('data-state="unreachable"');
+  });
+});
+
+describe('the custom-code files (#14)', () => {
+  // An opened entry whose pipeline has a custom-code step naming
+  // src/discounts.go, its file read and then typed into.
+  async function openedWithCode() {
+    const agent = fakeAgent();
+    const controller = createPipelinesController(agent.client);
+    controller.setOnline(true);
+    agent
+      .next('GET', '/api/pipelines')
+      .answer(json(200, fixtureList('every-state')));
+    await agent.settle();
+    const location = { root: '/home/user/code/app', directory: 'billing' };
+    controller.open(location);
+    const document = pipelinesFixtures.documents.valid[0]?.body;
+    agent.next('GET', '/api/pipelines/open').answer(
+      json(200, {
+        ...(document as object),
+        pipeline: graphFixtures['every-block-type'],
+      }),
+    );
+    await agent.settle();
+    const sources = createSourcesController(agent.client, location);
+    sources.setOnline(true);
+    sources.load(['src/discounts.go']);
+    agent.next('GET', '/api/pipelines/source').answer(
+      json(200, {
+        ...location,
+        path: 'src/discounts.go',
+        text: 'package discounts\n',
+        sha256: 'a'.repeat(64),
+        generated: false,
+      }),
+    );
+    await agent.settle();
+    sources.edit('src/discounts.go', 'package discounts // typed\n');
+    return { controller, sources };
+  }
+
+  it('lists a block with unsaved code in the side panel like one with an unsaved form', async () => {
+    const { controller, sources } = await openedWithCode();
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipelines={controller}
+        sources={sources}
+      />,
+    );
+    const sidePanel =
+      /<aside class="side-panel"[^>]*>(.*)<\/aside>/s.exec(html)?.[1] ?? '';
+    expect(sidePanel).toContain('data-unsaved="step:apply-discounts"');
+    expect(text(sidePanel)).toContain('has unsaved code');
+    expect(sidePanel).toContain('>Show</button>');
+  });
+
+  it('keeps an opened pipeline drawn while disconnected, below the connection state', async () => {
+    const { controller, sources } = await openedWithCode();
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'unreachable', retryInMs: 1000 }}
+        client={null}
+        pipelines={controller}
+        sources={sources}
+      />,
+    );
+    const graphArea =
+      /<main class="graph-area"[^>]*>(.*)<\/main>/s.exec(html)?.[1] ?? '';
+    expect(graphArea).toContain('data-state="unreachable"');
+    expect(graphArea).toContain('react-flow');
+  });
+
+  it('draws a pipeline not opened from disk with no file to read, asking nothing', () => {
+    const html = renderToStaticMarkup(
+      <Shell
+        state={{ status: 'connected' }}
+        client={null}
+        pipeline={graphFixtures['every-block-type']}
+      />,
+    );
+    expect(text(html)).toContain(codeWords.noFile);
+  });
+
+  it('asks naming every file whose code would be discarded', () => {
+    expect(discardQuestion(['src/a.py'])).toBe(
+      'Discard the unsaved code in src/a.py? The file on disk stays as last saved.',
+    );
+    expect(discardQuestion(['src/a.py', 'src/b.py'])).toContain(
+      'src/a.py, src/b.py',
+    );
   });
 });

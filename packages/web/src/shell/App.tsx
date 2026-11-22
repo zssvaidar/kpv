@@ -16,11 +16,21 @@
 // a select of the connection names the agent lists (#12), read again each
 // time a Kafka block's form is shown.
 //
+// A custom-code block shows its step's file in an editor on its node (#14).
+// The files are read and written here (sources.ts), never by the node: each
+// distinct path once when an opened pipeline is drawn and again when the
+// person asks to reload, and written only when they save. What was typed is
+// held here, in memory; deleting the last step naming a file with unsaved
+// code, going back to the list (the way to open another pipeline) or
+// reloading that file asks first, and the file on disk is never deleted.
+//
 // The connection state is in the status bar on every screen, and when there
 // is no working connection the graph area says why in words, so a dead or
-// refusing agent never looks like an empty screen.
+// refusing agent never looks like an empty screen. An opened pipeline stays
+// drawn below those words, so code typed and not yet saved stays in view,
+// with its Save disabled until the agent is back.
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import type { Pipeline } from '@kpv/schema';
 
@@ -30,6 +40,12 @@ import {
   createConnectionsController,
   type ConnectionsController,
 } from '../connections/controller.ts';
+import {
+  droppedPaths,
+  sourcePaths,
+  stepsNaming,
+  unsavedDroppedBy,
+} from '../blocks/source-buffer.ts';
 import { describeConnection } from '../connection/describe.ts';
 import type {
   ConnectionMonitor,
@@ -38,6 +54,7 @@ import type {
 import type { EditResult } from '../graph/edit.ts';
 import { EditControls } from '../graph/EditControls.tsx';
 import { blockForNode, nodeId, placedBlocks } from '../graph/layout.ts';
+import type { CodeSources } from '../graph/PipelineGraph.tsx';
 import { PipelineGraph } from '../graph/PipelineGraph.tsx';
 import { SelectionSummary } from '../graph/SelectionSummary.tsx';
 import {
@@ -60,6 +77,7 @@ import {
   pickerAnchor,
   PipelinesView,
 } from '../pipelines/PipelinesScreen.tsx';
+import { createSourcesController, type SourcesController } from './sources.ts';
 
 /**
  * What the configuration forms hold that the pipeline does not, by the node
@@ -82,6 +100,13 @@ const keptDrafts = (pipeline: Pipeline, drafts: Drafts): Drafts =>
   );
 
 const stepNode = (id: string): string => `step:${id}`;
+
+const noSubscription = () => () => undefined;
+const noPaths: readonly string[] = [];
+
+/** What the person is asked before typed code is dropped. */
+export const discardQuestion = (paths: readonly string[]): string =>
+  `Discard the unsaved code in ${paths.join(', ')}? The file${paths.length === 1 ? '' : 's'} on disk stay${paths.length === 1 ? 's' : ''} as last saved.`;
 
 export function App(props: {
   client: AgentClient | null;
@@ -110,6 +135,10 @@ export function Shell(props: {
   connectionNames?: ConnectionNamesController;
   /** Which screen the graph area starts on; the pipelines by default. */
   screen?: 'pipelines' | 'connections';
+  /** The custom-code files; by default one controller per opened pipeline. */
+  sources?: SourcesController;
+  /** Asks the person a yes or no question; `window.confirm` by default. */
+  confirm?: (question: string) => boolean;
 }) {
   const { state, client } = props;
   const [screen, setScreen] = useState(props.screen ?? 'pipelines');
@@ -164,6 +193,30 @@ export function Shell(props: {
     namesController.setOnline(connectedNow);
   }, [namesController, connectedNow]);
   const opened = props.pipeline ?? listed.opened?.pipeline ?? null;
+  // The files of the opened pipeline's custom-code blocks: one controller
+  // per opened entry, so another entry starts with none read.
+  const openedEntry = listed.opened;
+  const sources = useMemo(
+    () =>
+      props.sources ??
+      (openedEntry === null
+        ? null
+        : createSourcesController(client, openedEntry.location)),
+    [props.sources, openedEntry, client],
+  );
+  useEffect(() => {
+    sources?.setOnline(connectedNow);
+  }, [sources, connectedNow]);
+  const unsavedCode = useSyncExternalStore(
+    sources?.subscribe ?? noSubscription,
+    () => sources?.current().unsaved ?? noPaths,
+    () => sources?.current().unsaved ?? noPaths,
+  );
+  const confirmQuestion = props.confirm;
+  const ask = useMemo(
+    () => confirmQuestion ?? ((question: string) => window.confirm(question)),
+    [confirmQuestion],
+  );
   // The pipeline as edited, the selected node, why the last edit was refused
   // and the Kafka forms' unsaved input, owned here so the side panel can read
   // them. They belong to the pipeline they were made in, so another pipeline
@@ -183,6 +236,11 @@ export function Shell(props: {
         : { opened, pipeline: opened, node: null, notice: null, drafts: {} };
   const pipeline = current?.pipeline ?? null;
   const selected = current?.node ?? null;
+  useEffect(() => {
+    if (sources !== null && pipeline !== null) {
+      sources.load(sourcePaths(pipeline));
+    }
+  }, [sources, pipeline]);
   const onSelect = (node: string | null) => {
     if (current !== null) setEdits({ ...current, node });
   };
@@ -191,6 +249,18 @@ export function Shell(props: {
     if (!result.ok) {
       setEdits({ ...current, notice: result.reason });
       return;
+    }
+    // A file no step names any more is dropped with its buffer, after
+    // asking when it holds unsaved code; nothing is deleted on disk.
+    if (sources !== null) {
+      const dropped = droppedPaths(current.pipeline, result.pipeline);
+      const lost = unsavedDroppedBy(
+        current.pipeline,
+        result.pipeline,
+        unsavedCode,
+      );
+      if (lost.length > 0 && !ask(discardQuestion(lost))) return;
+      if (dropped.length > 0) sources.forget(dropped);
     }
     // A new step is selected; a deleted one no longer can be.
     const node =
@@ -291,6 +361,60 @@ export function Shell(props: {
           );
   const description = describeConnection(state);
   const connected = state.status === 'connected';
+  const language = pipeline?.language ?? 'python';
+  const offline = connected ? null : description.label;
+  const code = useMemo((): CodeSources | undefined => {
+    if (sources === null) return undefined;
+    return {
+      subscribe: sources.subscribe,
+      buffer: (path) => sources.current().buffers[path],
+      language,
+      offline,
+      onChange: (path, text) => {
+        sources.edit(path, text);
+      },
+      onSave: (path) => {
+        sources.save(path);
+      },
+      onReload: (path) => {
+        const unsaved = sources.current().unsaved.includes(path);
+        if (unsaved && !ask(discardQuestion([path]))) return;
+        sources.reload(path);
+      },
+    };
+  }, [sources, language, offline, ask]);
+  // The custom-code blocks whose file holds unsaved code, as the side panel
+  // lists them beside the forms.
+  const unsavedCodeNodes =
+    pipeline === null
+      ? []
+      : stepsNaming(pipeline, unsavedCode).filter((node) => node !== selected);
+  const graph =
+    pipeline === null ? null : (
+      <PipelineGraph
+        key={
+          listed.opened === null
+            ? pipeline.id
+            : `${listed.opened.location.root}\u0000${listed.opened.location.directory ?? ''}`
+        }
+        pipeline={pipeline}
+        selected={selected}
+        onSelect={onSelect}
+        onEdit={onEdit}
+        {...(code === undefined ? {} : { code })}
+      />
+    );
+  const notice = (
+    <section
+      className="connection-notice"
+      data-tone={description.tone}
+      data-state={state.status}
+      role="alert"
+    >
+      <h1>{description.label}</h1>
+      <p>{description.detail}</p>
+    </section>
+  );
   return (
     <div className="shell">
       <header className="status-bar">
@@ -331,38 +455,31 @@ export function Shell(props: {
                 type="button"
                 className="back-to-pipelines"
                 onClick={() => {
+                  if (
+                    unsavedCode.length > 0 &&
+                    !ask(discardQuestion(unsavedCode))
+                  ) {
+                    return;
+                  }
                   pipelines.close();
                 }}
               >
                 Back to the pipelines
               </button>
             )}
-            <PipelineGraph
-              key={
-                listed.opened === null
-                  ? pipeline.id
-                  : `${listed.opened.location.root}\u0000${listed.opened.location.directory ?? ''}`
-              }
-              pipeline={pipeline}
-              selected={selected}
-              onSelect={onSelect}
-              onEdit={onEdit}
-            />
+            {graph}
           </>
         ) : connected && listed.openFailure !== null ? (
           <OpenFailureView state={listed} actions={pipelines} />
         ) : connected ? (
           <PipelinesView state={listed} actions={pipelines} />
+        ) : graph !== null && listed.opened !== null ? (
+          <>
+            {notice}
+            {graph}
+          </>
         ) : (
-          <section
-            className="connection-notice"
-            data-tone={description.tone}
-            data-state={state.status}
-            role="alert"
-          >
-            <h1>{description.label}</h1>
-            <p>{description.detail}</p>
-          </section>
+          notice
         )}
       </main>
       <aside className="side-panel" aria-label="Side panel">
@@ -408,6 +525,7 @@ export function Shell(props: {
             <UnsavedElsewhere
               pipeline={pipeline}
               nodes={unsavedElsewhere}
+              codeNodes={unsavedCodeNodes}
               onShow={onSelect}
             />
           </>
